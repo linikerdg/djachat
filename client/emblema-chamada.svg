@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" role="img" aria-label="DJAchat">
+  <defs>
+    <path id="fone" d="M-146-30C-96-78 96-78 146-30 160-16 160 8 150 24L132 48C124 58 110 60 100 54L64 32C54 26 50 14 54 4L58-10C20-22-20-22-58-10L-54 4C-50 14-54 26-64 32L-100 54C-110 60-124 58-132 48L-150 24C-160 8-160-16-146-30Z"/>
+  </defs>
+  <rect x="24" y="44" width="464" height="424" rx="72" fill="#182130" stroke="#d8b45f" stroke-width="20"/>
+  <g fill="#d8b45f">
+    <path d="M186 206 172 122l48 36 36-66 36 66 48-36-14 84Z"/>
+    <rect x="184" y="216" width="144" height="22" rx="8"/>
+    <circle cx="172" cy="112" r="12"/>
+    <circle cx="256" cy="82" r="12"/>
+    <circle cx="340" cy="112" r="12"/>
+  </g>
+  <g fill="none" stroke="#d8b45f" stroke-width="18" stroke-linecap="round">
+    <path d="M132 128C118 150 118 182 132 204"/>
+    <path d="M92 104C66 144 66 188 92 228"/>
+    <path d="M380 128C394 150 394 182 380 204"/>
+    <path d="M420 104C446 144 446 188 420 228"/>
+  </g>
+  <use xlink:href="#fone" href="#fone" fill="#d8b45f" transform="translate(256 346) rotate(32) scale(.68)"/>
+  <use xlink:href="#fone" href="#fone" fill="#182130" stroke="#182130" stroke-width="30" stroke-linejoin="round" transform="translate(256 346) rotate(-32) scale(.68)"/>
+  <use xlink:href="#fone" href="#fone" fill="#d8b45f" transform="translate(256 346) rotate(-32) scale(.68)"/>
+</svg>

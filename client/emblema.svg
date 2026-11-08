@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" role="img" aria-label="Emblema DJAchat">
+  <defs>
+    <g id="trompete" fill="#f2c230">
+      <path d="M-120-18C-160-22-190-42-200-62V62C-190 42-160 22-120 18Z"/>
+      <rect x="-125" y="-18" width="245" height="36" rx="8"/>
+      <rect x="106" y="-30" width="20" height="60" rx="8"/>
+    </g>
+  </defs>
+  <rect x="24" y="44" width="464" height="424" rx="72" fill="#2c44a8" stroke="#f2c230" stroke-width="20"/>
+  <g fill="#f2c230">
+    <path d="M176 216 160 118l54 42 42-76 42 76 54-42-16 98Z"/>
+    <rect x="174" y="226" width="164" height="24" rx="8"/>
+    <circle cx="160" cy="108" r="13"/>
+    <circle cx="256" cy="74" r="13"/>
+    <circle cx="352" cy="108" r="13"/>
+  </g>
+  <use xlink:href="#trompete" href="#trompete" transform="translate(256 340) rotate(-32) scale(.74)"/>
+  <use xlink:href="#trompete" href="#trompete" transform="translate(256 340) rotate(212) scale(.74)"/>
+</svg>

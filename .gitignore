@@ -1,0 +1,11 @@
+# Dependências e builds
+node_modules/
+desktop/dist/
+desktop/client/
+
+# Dados do servidor: mensagens, arquivos e sons da galera
+server/data/
+
+# Diversos
+*.log
+.env

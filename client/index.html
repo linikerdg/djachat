@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>DJAchat</title>
+  <link rel="icon" href="emblema-chamada.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Tela de entrada -->
+<div id="login" class="screen">
+  <form id="loginForm" class="card">
+    <div class="logo"><img src="emblema-chamada.svg" alt=""></div>
+    <h1>DJAchat</h1>
+    <p class="muted">Entre no servidor da galera</p>
+    <label>Endereço do servidor<input id="lServer" placeholder="100.64.0.1:3000" required></label>
+    <label>Seu apelido<input id="lName" maxlength="32" placeholder="ex.: Liniker" required></label>
+    <label>Senha do servidor <span class="muted">(se tiver)</span><input id="lPass" type="password"></label>
+    <button type="submit" class="primary">Entrar</button>
+    <p id="lError" class="error"></p>
+  </form>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <aside id="sidebar">
+    <header class="server-name">DJAchat <span id="connDot" class="dot ok" title="Conectado"></span></header>
+    <div id="channelList">
+      <div class="cat"><span>Canais de texto</span><button class="icon add" data-kind="text" title="Criar canal de texto">＋</button></div>
+      <div id="textChannels"></div>
+      <div class="cat"><span>Canais de voz</span><button class="icon add" data-kind="voice" title="Criar canal de voz">＋</button></div>
+      <div id="voiceChannels"></div>
+    </div>
+
+    <div id="voicePanel" class="hidden">
+      <div class="vp-info">
+        <div class="vp-status">Voz conectada</div>
+        <div id="vpChannel" class="muted small"></div>
+      </div>
+      <div class="vp-buttons">
+        <button id="btnScreen" class="pill" title="Compartilhar tela">🖥️ Tela</button>
+        <button id="btnSoundboard" class="pill" title="Soundboard">🎵 Sons</button>
+        <button id="btnLeave" class="icon danger" title="Sair da voz">📞</button>
+      </div>
+    </div>
+
+    <footer id="userPanel">
+      <div class="avatar" id="meAvatar"></div>
+      <div class="me-name"><b id="meName"></b><span class="muted small">online</span></div>
+      <button id="btnMute" class="icon" title="Mutar microfone">🎙️</button>
+      <button id="btnDeafen" class="icon" title="Ensurdecer">🎧</button>
+      <button id="btnSettings" class="icon" title="Configurações">⚙️</button>
+    </footer>
+  </aside>
+
+  <main id="main">
+    <header id="mainHeader"><span id="chanTitle"></span><span id="chanSub" class="muted small"></span></header>
+
+    <!-- Visão de texto -->
+    <section id="textView">
+      <div id="messages"></div>
+      <div id="typing" class="muted small"></div>
+      <div id="uploads"></div>
+      <form id="composer">
+        <button type="button" id="btnAttach" class="icon" title="Enviar arquivo">＋</button>
+        <input type="file" id="fileInput" multiple hidden>
+        <textarea id="msgInput" rows="1" placeholder="Conversar…"></textarea>
+      </form>
+      <div id="dropHint" class="hidden">Solte para enviar</div>
+    </section>
+
+    <!-- Visão de voz -->
+    <section id="voiceView" class="hidden">
+      <div id="stage"></div>
+      <div id="tiles"></div>
+      <div class="voice-empty muted" id="voiceHint"></div>
+    </section>
+  </main>
+
+  <aside id="members">
+    <div class="cat"><span>Online — <b id="onlineCount">0</b></span></div>
+    <div id="memberList"></div>
+  </aside>
+</div>
+
+<!-- Soundboard -->
+<div id="soundboard" class="popover hidden">
+  <div class="pop-head">
+    <b>Soundboard</b>
+    <label class="small muted">Volume <input type="range" id="sbVolume" min="0" max="1" step="0.05" value="0.6"></label>
+  </div>
+  <div id="sbGrid"></div>
+  <div class="pop-foot">
+    <button id="sbUpload" class="pill">＋ Adicionar som</button>
+    <input type="file" id="sbFile" accept="audio/*" hidden>
+    <span class="muted small">mp3/ogg/wav até 3 MB</span>
+  </div>
+</div>
+
+<!-- Modal genérico -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <h2 id="modalTitle"></h2>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button id="modalCancel">Cancelar</button>
+      <button id="modalOk" class="primary">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

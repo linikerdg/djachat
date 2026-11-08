@@ -1,0 +1,24 @@
+{
+  "name": "djachat",
+  "productName": "DJAchat",
+  "version": "1.0.0",
+  "description": "Chat, voz, soundboard e tela para a galera",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "copiar-cliente": "node -e \"require('fs').cpSync('../client','client',{recursive:true})\"",
+    "build": "npm run copiar-cliente && electron-builder --win portable",
+    "build:mac": "npm run copiar-cliente && electron-builder --mac dmg",
+    "build:linux": "npm run copiar-cliente && electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "local.djachat.app",
+    "files": ["main.js", "preload.js", "client/**", "icon.png"],
+    "directories": { "output": "dist" },
+    "win": { "artifactName": "DJAchat.exe", "icon": "icon.png" }
+  }
+}
