@@ -1,7 +1,7 @@
 {
   "name": "djachat",
   "productName": "DJAchat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Chat, voz, soundboard e tela para a galera",
   "main": "main.js",
   "scripts": {
@@ -17,8 +17,18 @@
   },
   "build": {
     "appId": "local.djachat.app",
-    "files": ["main.js", "preload.js", "client/**", "icon.png"],
-    "directories": { "output": "dist" },
-    "win": { "artifactName": "DJAchat.exe", "icon": "icon.png" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "client/**",
+      "icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "artifactName": "DJAchat.exe",
+      "icon": "icon.png"
+    }
   }
 }

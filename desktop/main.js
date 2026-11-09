@@ -47,11 +47,11 @@ app.whenReady().then(() => {
     let sources = [];
     try {
       sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: false });
-    } catch (e) { console.error(e); return callback({}); }
+    } catch (e) { console.error(e); return callback(null); }   // null recusa o pedido; {} lança exceção
     win.webContents.send('pick-source', sources.map((s) => ({ id: s.id, name: s.name, thumbnail: s.thumbnail.toDataURL() })));
     ipcMain.once('picked', (_e, id, withAudio) => {
       const src = sources.find((s) => s.id === id);
-      if (!src) return callback({});
+      if (!src) return callback(null);   // cancelou no seletor
       const result = { video: src };
       if (withAudio && process.platform === 'win32') result.audio = 'loopback';   // som do PC (só Windows)
       callback(result);
