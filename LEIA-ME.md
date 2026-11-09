@@ -67,14 +67,14 @@ npm start
 Na tela de entrada, preencha o **endereço do servidor**, o **apelido** e a **senha**. O app lembra esses dados e entra sozinho nas próximas vezes.
 O host usa `localhost:3000`.
 
-### Gerar um .exe para mandar para os amigos (opcional)
+### Gerar um instalador para mandar para os amigos (opcional)
 
 ```bash
 cd desktop
 npm run build
 ```
 
-O arquivo `desktop/dist/DJAchat.exe` é portátil: os amigos só abrem, sem instalar Node.
+O arquivo `desktop/dist/DJAchat-Instalador.exe` instala o app sem pedir administrador e sem precisar do Node.
 
 ---
 

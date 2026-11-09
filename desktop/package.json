@@ -1,13 +1,13 @@
 {
   "name": "djachat",
   "productName": "DJAchat",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Chat, voz, soundboard e tela para a galera",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "copiar-cliente": "node -e \"require('fs').cpSync('../client','client',{recursive:true})\"",
-    "build": "npm run copiar-cliente && electron-builder --win portable",
+    "build": "npm run copiar-cliente && electron-builder --win nsis",
     "build:mac": "npm run copiar-cliente && electron-builder --mac dmg",
     "build:linux": "npm run copiar-cliente && electron-builder --linux AppImage"
   },
@@ -27,8 +27,17 @@
       "output": "dist"
     },
     "win": {
-      "artifactName": "DJAchat.exe",
       "icon": "icon.png"
+    },
+    "nsis": {
+      "artifactName": "DJAchat-Instalador.exe",
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "DJAchat",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
     }
   }
 }
