@@ -1,7 +1,7 @@
 {
   "name": "djachat",
   "productName": "DJAchat",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Chat, voz, soundboard e tela para a galera",
   "main": "main.js",
   "scripts": {
@@ -31,12 +31,13 @@
     },
     "nsis": {
       "artifactName": "DJAchat-Instalador.exe",
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "installer.nsh",
+      "language": "1046",
+      "installerLanguages": ["pt_BR"],
       "shortcutName": "DJAchat",
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
     }
   }
