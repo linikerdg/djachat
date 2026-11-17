@@ -902,9 +902,9 @@ const backup = () => fazerBackup().catch((e) => console.error('Falha no backup d
 // Vai criptografado com a senha do grupo (AES-256-GCM, chave por scrypt): só quem sabe a senha usa.
 const PREFIXO_CODIGO = 'DJA1.';
 const chaveDoCodigo = (senha, sal) => crypto.scryptSync(String(senha), sal, 32, { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-function gerarCodigoHospedagem() {
+function gerarCodigoHospedagem(senha = SENHA) {
   const sal = crypto.randomBytes(16), iv = crypto.randomBytes(12);
-  const cifra = crypto.createCipheriv('aes-256-gcm', chaveDoCodigo(SENHA, sal), iv);
+  const cifra = crypto.createCipheriv('aes-256-gcm', chaveDoCodigo(senha, sal), iv);
   const dados = Buffer.concat([cifra.update(JSON.stringify({ rt: config.onedrive.refresh_token })), cifra.final()]);
   return PREFIXO_CODIGO + Buffer.concat([sal, iv, cifra.getAuthTag(), dados]).toString('base64url');
 }
@@ -953,6 +953,24 @@ async function conectarOneDrive() {
     else console.log('  Esta conta ainda não tem dados do DJAchat: o servidor envia os deste PC ao abrir.');
   } catch (e) { console.log(`  (não consegui conferir os dados agora: ${e.message})`); }
   console.log('  Agora é só iniciar o servidor normalmente.\n');
+}
+
+// gerar-codigo.bat: mostra (e copia) o código de hospedagem sem abrir o servidor nem o app
+async function gerarCodigoNoTerminal() {
+  if (!compartilhado) throw new Error('este PC não está ligado ao OneDrive. Rode o conectar-onedrive.bat primeiro.');
+  const grupo = await compartilhado.lerConfig();
+  if (!grupo || !grupo.senha) throw new Error('os dados do grupo ainda não estão no OneDrive. Abra o servidor uma vez neste PC (ele envia os dados) e depois gere o código.');
+  const codigo = gerarCodigoHospedagem(process.env.SENHA || grupo.senha);
+  console.log('\n  Código para hospedar o DJAchat em outro PC:\n');
+  console.log(codigo);
+  let copiado = false;
+  if (process.platform === 'win32') {
+    try { require('child_process').execFileSync('clip', { input: codigo }); copiado = true; } catch { /* sem clip: fica só na tela */ }
+  }
+  console.log(`\n  ${copiado ? 'Já está copiado: é só colar' : 'Copie o código acima e mande'} para quem vai hospedar.`);
+  console.log('  No outro PC, abra o conectar-onedrive.bat, cole o código e digite a senha do servidor.');
+  console.log('  Trate o código como a senha: junto com ela, dá acesso à pasta do DJAchat no OneDrive.');
+  console.log('  Use em poucos dias: se ficar meses parado, a Microsoft pode invalidar a autorização.\n');
 }
 
 async function iniciar() {
@@ -1007,6 +1025,10 @@ if (process.argv.includes('--conectar-onedrive')) {
   conectarOneDrive()
     .then(() => process.exit(0))
     .catch((e) => { console.error(`  Não consegui conectar: ${e.message}`); process.exit(1); });
+} else if (process.argv.includes('--gerar-codigo')) {
+  gerarCodigoNoTerminal()
+    .then(() => process.exit(0))
+    .catch((e) => { console.error(`\n  Não consegui gerar o código: ${e.message}\n`); process.exit(1); });
 } else if (process.argv.includes('--configurar-turn')) {
   const i = process.argv.indexOf('--configurar-turn');
   config.turn = turn = { id: process.argv[i + 1], token: process.argv[i + 2] };

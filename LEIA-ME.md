@@ -122,7 +122,11 @@ O app só acessa a própria pasta (`Aplicativos/DJAchat`), nunca os demais arqui
 
 **Primeira vez do grupo:** quem guarda os dados dá dois cliques em **`conectar-onedrive.bat`**, aperta Enter e entra com a conta Microsoft dele seguindo o código mostrado.
 
-**Outro PC vai hospedar (uma vez por PC):** com alguém já hospedando, abra o app e clique em ⚙️ Configurações → **Copiar código para hospedar**. No PC novo, dê dois cliques em `conectar-onedrive.bat`, cole o código e digite a senha do servidor. Não precisa entrar na conta Microsoft de ninguém. O código só funciona junto com a senha, mas trate-o como uma chave: ele dá acesso à pasta do DJAchat no OneDrive. Para cancelar todos os acessos, o dono da conta remove o app em account.microsoft.com → Privacidade → Aplicativos e serviços, e conecta de novo.
+**Outro PC vai hospedar (uma vez por PC):** pegue o código de um destes jeitos, com antecedência:
+- no PC que já está ligado ao OneDrive, dê dois cliques em **`gerar-codigo.bat`** (não precisa abrir o servidor; o código já sai copiado);
+- ou, com alguém hospedando, no app: ⚙️ Configurações → **Copiar código para hospedar**.
+
+Use o código em poucos dias. No PC novo, dê dois cliques em `conectar-onedrive.bat`, cole o código e digite a senha do servidor. Não precisa entrar na conta Microsoft de ninguém. O código só funciona junto com a senha, mas trate-o como uma chave: ele dá acesso à pasta do DJAchat no OneDrive. Para cancelar todos os acessos, o dono da conta remove o app em account.microsoft.com → Privacidade → Aplicativos e serviços, e conecta de novo.
 
 No fim, o terminal confirma quantas mensagens achou na conta.
 
