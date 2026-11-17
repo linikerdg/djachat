@@ -8,6 +8,16 @@
 </head>
 <body>
 
+<!-- Barra da janela (só no app desktop): arrasta a janela; minimizar, maximizar e fechar (bandeja ou sair, conforme Configurações) -->
+<header id="barraJanela" class="hidden">
+  <div class="arrastar"><img src="emblema-chamada.svg" alt=""><span>DJAchat</span></div>
+  <div class="botoes-janela">
+    <button type="button" id="jMinimizar" title="Minimizar"><i data-ic="minus"></i></button>
+    <button type="button" id="jMaximizar" title="Maximizar"><i data-ic="square"></i></button>
+    <button type="button" id="jFechar" class="fechar" title="Fechar (o DJAchat continua na bandeja)"><i data-ic="x"></i></button>
+  </div>
+</header>
+
 <!-- Tela de entrada -->
 <div id="login" class="screen">
   <form id="loginForm" class="card">
@@ -27,10 +37,12 @@
   <aside id="sidebar">
     <header class="server-name">DJAchat <span id="connDot" class="dot ok" title="Conectado"></span></header>
     <div id="channelList">
-      <div class="cat"><span>Canais de texto</span><button class="icon add" data-kind="text" title="Criar canal de texto">＋</button></div>
+      <div class="cat"><span>Canais de texto</span><button class="icon add" data-kind="text" title="Criar canal de texto"><i data-ic="plus"></i></button></div>
       <div id="textChannels"></div>
-      <div class="cat"><span>Canais de voz</span><button class="icon add" data-kind="voice" title="Criar canal de voz">＋</button></div>
+      <div class="cat"><span>Canais de voz</span><button class="icon add" data-kind="voice" title="Criar canal de voz"><i data-ic="plus"></i></button></div>
       <div id="voiceChannels"></div>
+      <div class="cat hidden" id="dmCat"><span>Mensagens diretas</span></div>
+      <div id="dmList"></div>
     </div>
 
     <div id="voicePanel" class="hidden">
@@ -39,18 +51,18 @@
         <div id="vpChannel" class="muted small"></div>
       </div>
       <div class="vp-buttons">
-        <button id="btnScreen" class="pill" title="Compartilhar tela">🖥️ Tela</button>
-        <button id="btnSoundboard" class="pill" title="Soundboard">🎵 Sons</button>
-        <button id="btnLeave" class="icon danger" title="Sair da voz">📞</button>
+        <button id="btnScreen" class="pill" title="Compartilhar tela"><i data-ic="screen-share"></i><span>Tela</span></button>
+        <button id="btnSoundboard" class="pill" title="Soundboard"><i data-ic="music"></i><span>Sons</span></button>
+        <button id="btnLeave" class="icon danger" title="Sair da voz"><i data-ic="phone-off"></i></button>
       </div>
     </div>
 
     <footer id="userPanel">
       <div class="avatar" id="meAvatar"></div>
       <div class="me-name"><b id="meName"></b><span class="muted small">online</span></div>
-      <button id="btnMute" class="icon" title="Mutar microfone">🎙️</button>
-      <button id="btnDeafen" class="icon" title="Ensurdecer">🎧</button>
-      <button id="btnSettings" class="icon" title="Configurações">⚙️</button>
+      <button id="btnMute" class="icon" title="Mutar microfone"><i data-ic="mic"></i></button>
+      <button id="btnDeafen" class="icon" title="Ensurdecer"><i data-ic="headphones"></i></button>
+      <button id="btnSettings" class="icon" title="Configurações"><i data-ic="settings"></i></button>
     </footer>
   </aside>
 
@@ -62,10 +74,13 @@
       <div id="messages"></div>
       <div id="typing" class="muted small"></div>
       <div id="uploads"></div>
+      <div id="respondendo" class="hidden"></div>
+      <div id="anexos"></div>
       <form id="composer">
-        <button type="button" id="btnAttach" class="icon" title="Enviar arquivo">＋</button>
+        <button type="button" id="btnAttach" class="icon" title="Anexar arquivo"><i data-ic="paperclip"></i></button>
         <input type="file" id="fileInput" multiple hidden>
         <textarea id="msgInput" rows="1" placeholder="Conversar…"></textarea>
+        <button type="button" id="btnSend" class="icon" title="Enviar (Enter)"><i data-ic="send-horizontal"></i></button>
       </form>
       <div id="dropHint" class="hidden">Solte para enviar</div>
     </section>
@@ -92,7 +107,7 @@
   </div>
   <div id="sbGrid"></div>
   <div class="pop-foot">
-    <button id="sbUpload" class="pill">＋ Adicionar som</button>
+    <button id="sbUpload" class="pill"><i data-ic="plus"></i><span>Adicionar som</span></button>
     <input type="file" id="sbFile" accept="audio/*" hidden>
     <span class="muted small">mp3/ogg/wav até 3 MB</span>
   </div>
@@ -112,6 +127,7 @@
 
 <div id="toast" class="hidden"></div>
 
+<script src="icones.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

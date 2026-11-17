@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { criarOneDrive } = require('./onedrive');
+const { criarCompartilhado } = require('./compartilhado');
 const { iniciarTunel } = require('./tunel');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -27,6 +28,7 @@ const MAX_WS = 1024 * 1024;           // 1 MB por mensagem do WebSocket
 const MAX_ONEDRIVE = (Number(process.env.LIMITE_ONEDRIVE_GB) || 200) * 1024 ** 3;
 const ONEDRIVE_CLIENT_ID = process.env.ONEDRIVE_CLIENT_ID || '6dd8bd2c-4c31-4cfe-9518-4b2ef8dad356';   // identificador público do app
 const BACKUPS = 30;                   // cópias das conversas mantidas no OneDrive
+const PRAZO_TRAVA = (Number(process.env.TRAVA_SEGUNDOS) || 120) * 1000;   // sem renovar por esse tempo, outro PC pode assumir
 
 fs.mkdirSync(FILES_DIR, { recursive: true });
 
@@ -44,18 +46,23 @@ if (JSON.stringify(config) !== configAntes) salvarConfig();
 
 const oneDrive = criarOneDrive({
   clientId: ONEDRIVE_CLIENT_ID,
+  prefixo: process.env.ONEDRIVE_PASTA || '',
   obterRefresh: () => config.onedrive && config.onedrive.refresh_token,
   salvarRefresh: (refresh_token) => { config.onedrive = { refresh_token }; salvarConfig(); },
 });
+// Com OneDrive, os dados do grupo (conversas, canais, sons, senha) ficam lá e valem em qualquer PC
+const compartilhado = oneDrive.ativo ? criarCompartilhado({ oneDrive, prazoMs: PRAZO_TRAVA, aoPerder: (motivo) => perdeuTrava(motivo) }) : null;
 
 // ---------------------------------------------------------------- ICE (STUN e TURN)
 const STUN = { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] };
 let iceServers = [STUN];
 
+let turn = config.turn;   // a chave deste PC; sem ela, usa a do grupo (se houver)
+
 async function atualizarIce() {
-  if (!config.turn) return;
-  const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${config.turn.id}/credentials/generate-ice-servers`, {
-    method: 'POST', headers: { authorization: `Bearer ${config.turn.token}`, 'content-type': 'application/json' },
+  if (!turn) return;
+  const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${turn.id}/credentials/generate-ice-servers`, {
+    method: 'POST', headers: { authorization: `Bearer ${turn.token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ ttl: 86400 }), signal: AbortSignal.timeout(15000),
   });
   if (!r.ok) {
@@ -70,10 +77,14 @@ async function atualizarIce() {
 }
 const renovarIce = () => atualizarIce().catch((e) => console.error('Falha ao obter o TURN:', e.message));
 
-const SENHA = SEM_SENHA ? '' : process.env.SENHA || config.senha;
-const derivar = (uso) => crypto.createHmac('sha256', config.segredo).update(`${uso}:${SENHA}`).digest('hex');
-const SESSAO = derivar('sessao');           // guardada no app no lugar da senha
-const TOKEN_ARQUIVOS = derivar('arquivos'); // estável entre conexões; muda junto com a senha
+// Definidos ao iniciar: com OneDrive, senha e segredo vêm do grupo, para valerem em qualquer PC
+let SENHA = '', SESSAO = '', TOKEN_ARQUIVOS = '';
+function definirSenha(senha, segredo) {
+  SENHA = SEM_SENHA ? '' : process.env.SENHA || senha;
+  const derivar = (uso) => crypto.createHmac('sha256', segredo).update(`${uso}:${SENHA}`).digest('hex');
+  SESSAO = derivar('sessao');            // guardada no app no lugar da senha
+  TOKEN_ARQUIVOS = derivar('arquivos');  // estável entre conexões; muda junto com a senha
+}
 
 function igual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -82,7 +93,7 @@ function igual(a, b) {
 }
 
 // ---------------------------------------------------------------- banco (JSON)
-let db = {
+const dbVazio = () => ({
   channels: [
     { id: 'geral', name: 'geral', kind: 'text' },
     { id: 'memes', name: 'memes', kind: 'text' },
@@ -90,12 +101,22 @@ let db = {
     { id: 'voz-2', name: 'Sala 2', kind: 'voice' },
   ],
   messages: {},   // channelId -> [message]
-  files: {},      // fileId -> { name, size, mime }
+  files: {},      // fileId -> { name, size, mime, remote?, pasta? }
   sounds: [],     // { id, name, fileId, emoji }
-};
+  contas: {},     // uid -> { nome }   (conta leve: o código secreto fica no app de cada um)
+  apelidos: {},   // apelido em minúsculas -> uid dono
+});
+let db = dbVazio();
+// No modo OneDrive, a cópia local diz em qual versão do OneDrive se baseia e se tem mudanças ainda não enviadas
+let sync = { versao: 0, pendente: false, compartilhado: false };
+let dbLocalExistia = false;
 if (fs.existsSync(DB_FILE)) {
   try {
-    db = { ...db, ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
+    const lido = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    if (lido._sync) sync = { versao: Number(lido._sync.versao) || 0, pendente: !!lido._sync.pendente, compartilhado: true };
+    delete lido._sync; delete lido.versao;
+    db = { ...db, ...lido };
+    dbLocalExistia = true;
   } catch (e) {
     // nunca sobrescreve um banco ilegível: guarda uma cópia antes de começar do zero
     const copia = `${DB_FILE}.corrompido-${Date.now()}`;
@@ -105,28 +126,167 @@ if (fs.existsSync(DB_FILE)) {
   }
 }
 // sem protótipo: chaves como "__proto__" ou "constructor" vindas da rede não acham nada
-db.messages = Object.assign(Object.create(null), db.messages);
-db.files = Object.assign(Object.create(null), db.files);
+function normalizarDb() {
+  db.messages = Object.assign(Object.create(null), db.messages);
+  db.files = Object.assign(Object.create(null), db.files);
+  db.contas = Object.assign(Object.create(null), db.contas);
+  db.apelidos = Object.assign(Object.create(null), db.apelidos);
+}
+normalizarDb();
 
 // um erro inesperado não pode derrubar a sala de todo mundo
 process.on('uncaughtException', (e) => console.error('Erro inesperado:', e));
 process.on('unhandledRejection', (e) => console.error('Promessa rejeitada:', e));
 
-let saveTimer = null;
+function gravarLocal() {
+  const tmp = DB_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(compartilhado ? { ...db, _sync: sync } : db));
+  fs.renameSync(tmp, DB_FILE);
+}
+
+let saveTimer = null, mudancas = 0;
 function save(delay = 300) {
+  mudancas++;
+  if (compartilhado) { sync.pendente = true; agendarRemoto(); }
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    try {
-      const tmp = DB_FILE + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(db));
-      fs.renameSync(tmp, DB_FILE);
-    } catch (e) {
+    try { gravarLocal(); }
+    catch (e) {
       // no Windows o antivírus pode travar o arquivo por um instante
       console.error('Falha ao salvar o banco, tentando de novo:', e.message);
       save(5000);
     }
   }, delay);
+}
+
+// ---------------------------------------------------------------- banco no OneDrive
+// O banco inteiro vai para o OneDrive alguns segundos depois de cada mudança.
+let remotoTimer = null, enviandoRemoto = null;
+function agendarRemoto(atraso = 3000) {
+  if (remotoTimer || !compartilhado || !compartilhado.ativa) return;
+  remotoTimer = setTimeout(() => { remotoTimer = null; enviarRemoto(); }, atraso);
+}
+function enviarRemoto() {
+  if (enviandoRemoto) { agendarRemoto(); return enviandoRemoto; }
+  if (!sync.pendente || !compartilhado.ativa) return Promise.resolve();
+  const marca = mudancas, versao = sync.versao + 1;
+  const texto = JSON.stringify({ ...db, versao });
+  enviandoRemoto = (async () => {
+    try {
+      await compartilhado.salvarBanco(texto);
+      sync.versao = versao;
+      if (mudancas === marca) sync.pendente = false;
+      try { gravarLocal(); } catch { /* a próxima gravação local acerta */ }
+      if (!sync.pendente) limparLocaisMigrados();
+    } catch (e) {
+      if (e.codigo === 'conflito') return perdeuTrava('o banco no OneDrive foi alterado por outro servidor');
+      console.error('Falha ao salvar no OneDrive, tentando de novo:', e.message);
+      agendarRemoto(15000);
+    } finally { enviandoRemoto = null; }
+    if (sync.pendente) agendarRemoto();
+  })();
+  return enviandoRemoto;
+}
+
+const contarMensagens = (d) => Object.values(d.messages || {}).reduce((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+const temConteudo = (d) => contarMensagens(d) > 0 || (d.sounds || []).length > 0;
+
+// Pega a trava, combina a cópia local com a do OneDrive e devolve a senha do grupo
+async function iniciarCompartilhado() {
+  await compartilhado.travar();
+
+  let grupo = await compartilhado.lerConfig();
+  if (!grupo) {
+    grupo = { senha: process.env.SENHA || config.senha || crypto.randomBytes(6).toString('hex'), segredo: config.segredo };
+    if (config.turn) grupo.turn = config.turn;
+    try { await compartilhado.criarConfig(grupo); }
+    catch (e) { if (e.codigo !== 'conflito') throw e; grupo = await compartilhado.lerConfig(); }
+  }
+
+  const remoto = await compartilhado.lerBanco();
+  if (!remoto) {
+    console.log(`  Primeira vez no OneDrive: enviando os dados deste PC (${contarMensagens(db)} mensagens).`);
+    sync = { versao: 0, pendente: true, compartilhado: true };
+    await enviarRemoto();
+    if (sync.pendente) throw new Error('não consegui enviar os dados deste PC para o OneDrive');
+    return grupo;
+  }
+  const versaoRemota = Number(remoto.versao) || 0;
+  delete remoto.versao;
+  if (sync.compartilhado && sync.pendente && sync.versao === versaoRemota) {
+    // este PC fechou antes de enviar as últimas mudanças, e ninguém mexeu no OneDrive depois
+    console.log('  Este PC tinha mudanças ainda não enviadas ao OneDrive: enviando agora.');
+    await enviarRemoto();
+    return grupo;
+  }
+  const soNestePC = dbLocalExistia && (sync.pendente || !sync.compartilhado) && temConteudo(db)
+    && JSON.stringify(db.messages) !== JSON.stringify(remoto.messages);
+  if (soNestePC) {
+    const copia = path.join(DATA_DIR, `db.so-neste-pc-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    fs.writeFileSync(copia, JSON.stringify(db));
+    console.log('  ATENÇÃO: este PC tinha conversas diferentes das do OneDrive. Valem as do OneDrive;');
+    console.log(`  as deste PC foram guardadas em ${copia}`);
+  }
+  db = { ...dbVazio(), ...remoto };
+  normalizarDb();
+  sync = { versao: versaoRemota, pendente: false, compartilhado: true };
+  gravarLocal();
+  return grupo;
+}
+
+// Arquivos que ficaram neste PC (OneDrive fora do ar no envio, sons, dados antigos) vão para o OneDrive
+let migrando = false;
+async function migrarLocais() {
+  if (!compartilhado || !compartilhado.ativa || migrando) return;
+  migrando = true;
+  try {
+    for (const [id, f] of Object.entries(db.files)) {
+      if (f.remote || !compartilhado.ativa) continue;
+      const local = path.join(FILES_DIR, id);
+      const st = await fs.promises.stat(local).catch(() => null);
+      if (!st) continue;   // foi enviado em outro PC e ainda está lá
+      try {
+        const { remote, pasta } = await oneDrive.enviarArquivo(id, f.name, local, st.size);
+        if (db.files[id] !== f) { oneDrive.apagar(pasta).catch(() => {}); continue; }   // apagado enquanto subia
+        Object.assign(f, { remote, pasta });
+        if (f.backup) { delete f.backup; oneDrive.apagarCaminho(`backups/sons/${id}`).catch(() => {}); }
+        migrados.add(id);
+        save();
+      } catch (e) { console.error(`Falha ao levar "${f.name}" para o OneDrive (tento de novo depois):`, e.message); }
+    }
+  } finally { migrando = false; }
+}
+// a cópia local só sai depois que o banco com o novo endereço chegou ao OneDrive
+const migrados = new Set();
+function limparLocaisMigrados() {
+  for (const id of migrados) if (!db.files[id] || db.files[id].remote) fs.rm(path.join(FILES_DIR, id), { force: true }, () => {});
+  migrados.clear();
+}
+
+function perdeuTrava(motivo) {
+  console.error(`\n  O servidor vai fechar: ${motivo}.`);
+  console.error('  Os dados deste PC ficaram guardados e serão conferidos na próxima vez que ele abrir.\n');
+  encerrar(1);
+}
+
+let encerrando = false;
+async function encerrar(codigo = 0) {
+  if (encerrando) return;
+  encerrando = true;
+  setTimeout(() => process.exit(codigo), 8000).unref();   // o Windows fecha a janela à força pouco depois
+  try {
+    server.close();
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    try { gravarLocal(); } catch { /* */ }
+    if (compartilhado && compartilhado.ativa) {
+      clearTimeout(remotoTimer); remotoTimer = null;
+      if (enviandoRemoto) await enviandoRemoto;
+      if (sync.pendente) await enviarRemoto();
+      await compartilhado.liberar();
+    }
+  } catch (e) { console.error('Falha ao fechar:', e.message); }
+  process.exit(codigo);
 }
 
 const anexos = (msgs) => msgs.flatMap((m) => (m.attachments || []).map((a) => a.id));
@@ -148,7 +308,6 @@ function purgeFiles(ids) {
   }
   if (mudou) save();
 }
-purgeFiles(Object.keys(db.files));   // uploads que nunca viraram mensagem
 
 const uid = () => crypto.randomBytes(8).toString('hex');
 const str = (v) => (typeof v === 'string' ? v : '');
@@ -158,7 +317,8 @@ const COLORS = ['#e8a58f', '#e3c26f', '#8fd0a8', '#86d0c4', '#a3bde3', '#e0a6c6'
 const clients = new Map();  // id -> { id, ip, name, color, sock, voice, muted, deafened, sharing }
 const tentativas = new Map();  // ip -> { n, ate, em } (senhas erradas)
 
-const publicUser = (c) => ({ id: c.id, name: c.name, color: c.color, voice: c.voice, muted: c.muted, deafened: c.deafened, sharing: c.sharing });
+// id = conexão (voz e sinalização); uid = conta (estável entre conexões e PCs)
+const publicUser = (c) => ({ id: c.id, uid: c.uid, name: c.name, color: c.color, voice: c.voice, muted: c.muted, deafened: c.deafened, sharing: c.sharing });
 const users = () => [...clients.values()].filter((c) => c.name).map(publicUser);
 
 function send(c, obj) { if (c && c.sock) wsSend(c.sock, JSON.stringify(obj)); }
@@ -167,6 +327,24 @@ function broadcast(obj, filter) {
   for (const c of clients.values()) if (c.name && (!filter || filter(c))) wsSend(c.sock, s);
 }
 const pushUsers = () => broadcast({ t: 'users', users: users() });
+
+// ---------------------------------------------------------------- mensagens diretas
+// Uma conversa direta é um "canal" dm:<uid>:<uid> que só os dois participantes leem e recebem.
+const RE_DM = /^dm:([a-f0-9]{16}):([a-f0-9]{16})$/;
+const participantes = (canal) => { const r = RE_DM.exec(str(canal)); return r ? [r[1], r[2]] : null; };
+const podeVer = (c, canal) => { const p = participantes(canal); return !p || (!!c.uid && p.includes(c.uid)); };
+const publicoDe = (canal) => { const p = participantes(canal); return p ? (o) => !!o.uid && p.includes(o.uid) : undefined; };
+function dmsDe(uidConta) {
+  return Object.keys(db.messages).map((k) => [k, participantes(k)]).filter(([, p]) => p && p.includes(uidConta))
+    .map(([k, p]) => { const outro = p[0] === uidConta ? p[1] : p[0]; return { id: k, kind: 'dm', outro, name: (db.contas[outro] || {}).nome || '?' }; });
+}
+const resumoMsg = (m) => (m.text ? m.text.slice(0, 120) : m.attachments && m.attachments.length ? `[anexo: ${m.attachments[0].name}]` : '');
+function acharMsg(c, canal, id) {
+  if (!podeVer(c, canal)) return null;
+  const lista = db.messages[canal];
+  return lista ? lista.find((x) => x.id === id) : null;
+}
+const COR = (nome) => COLORS[[...nome].reduce((a, ch) => a + ch.charCodeAt(0), 0) % COLORS.length];
 
 // ---------------------------------------------------------------- protocolo
 function onMessage(c, raw) {
@@ -187,9 +365,26 @@ function onMessage(c, raw) {
       }
       tentativas.delete(c.ip);
     }
-    c.name = str(m.name).trim().slice(0, 32) || 'Anônimo';
-    c.color = COLORS[[...c.name].reduce((a, ch) => a + ch.charCodeAt(0), 0) % COLORS.length];
-    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, sounds: db.sounds, users: users() });
+    const nome = str(m.name).trim().slice(0, 32) || 'Anônimo';
+    // conta leve: o app manda um código secreto; o primeiro código a usar um apelido fica dono dele
+    const chave = str(m.chave);
+    const dono = db.apelidos[nome.toLowerCase()];
+    if (/^[a-f0-9]{32,64}$/.test(chave)) {
+      const uidConta = crypto.createHash('sha256').update(`djachat-conta:${chave}`).digest('hex').slice(0, 16);
+      if (dono && dono !== uidConta) return send(c, { t: 'error', code: 'apelido', message: `O apelido "${nome}" já é de outra pessoa. Escolha outro.` });
+      if (!dono || !db.contas[uidConta] || db.contas[uidConta].nome !== nome) {
+        db.apelidos[nome.toLowerCase()] = uidConta;
+        db.contas[uidConta] = { nome };
+        save();
+      }
+      c.uid = uidConta;
+    } else {
+      if (dono) return send(c, { t: 'error', code: 'apelido', message: `O apelido "${nome}" pertence a uma conta. Atualize o DJAchat para entrar com ele.` });
+      c.uid = null;   // app antigo: entra, mas sem mensagens diretas nem editar/apagar
+    }
+    c.name = nome;
+    c.color = COR(nome);
+    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], sounds: db.sounds, users: users() });
     pushUsers();
     return;
   }
@@ -197,28 +392,109 @@ function onMessage(c, raw) {
 
   switch (m.t) {
     case 'history': {
+      if (!podeVer(c, m.channel)) return;
       const list = db.messages[m.channel] || [];
       send(c, { t: 'history', channel: m.channel, messages: list.slice(-HISTORY) });
       break;
     }
     case 'msg': {
-      const ch = db.channels.find((x) => x.id === m.channel && x.kind === 'text');
-      if (!ch) return;
+      const p = participantes(m.channel);
+      let canal;
+      if (p) {
+        if (!c.uid || !p.includes(c.uid) || !db.contas[p[0]] || !db.contas[p[1]]) return;
+        canal = m.channel;
+      } else {
+        const ch = db.channels.find((x) => x.id === m.channel && x.kind === 'text');
+        if (!ch) return;
+        canal = ch.id;
+      }
       const text = str(m.text).slice(0, 4000);
       const attachments = (Array.isArray(m.attachments) ? m.attachments : [])
         .filter((a) => a && typeof a.id === 'string' && db.files[a.id]).slice(0, 10)
         .map((a) => { const { name, size, mime } = db.files[a.id]; return { id: a.id, name, size, mime }; });
       if (!text.trim() && !attachments.length) return;
-      const msg = { id: uid(), channel: ch.id, authorId: c.id, author: c.name, color: c.color, text, attachments, ts: Date.now() };
-      (db.messages[ch.id] ||= []).push(msg);
-      if (db.messages[ch.id].length > 5000) purgeFiles(anexos(db.messages[ch.id].splice(0, 1000)));
+      const msg = { id: uid(), channel: canal, authorId: c.id, uid: c.uid, author: c.name, color: c.color, text, attachments, ts: Date.now() };
+      const original = m.respondendo && (db.messages[canal] || []).find((x) => x.id === m.respondendo);
+      if (original) msg.resposta = { id: original.id, author: original.author, text: resumoMsg(original) };
+      const dmNova = p && !db.messages[canal];
+      (db.messages[canal] ||= []).push(msg);
+      if (db.messages[canal].length > 5000) purgeFiles(anexos(db.messages[canal].splice(0, 1000)));
       save();
-      broadcast({ t: 'msg', message: msg });
+      broadcast({ t: 'msg', message: msg }, publicoDe(canal));
+      if (dmNova) for (const o of clients.values()) if (o.uid && p.includes(o.uid)) send(o, { t: 'dms', dms: dmsDe(o.uid) });
+      break;
+    }
+    case 'msg_edit': {
+      const msg = acharMsg(c, m.channel, m.id);
+      const text = str(m.text).slice(0, 4000);
+      if (!msg || !c.uid || msg.uid !== c.uid || (!text.trim() && !(msg.attachments || []).length)) return;
+      msg.text = text; msg.editada = Date.now();
+      save();
+      broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
+      break;
+    }
+    case 'msg_delete': {
+      const msg = acharMsg(c, m.channel, m.id);
+      if (!msg || !c.uid || msg.uid !== c.uid) return;
+      const lista = db.messages[m.channel];
+      lista.splice(lista.indexOf(msg), 1);
+      purgeFiles(anexos([msg]));
+      save();
+      broadcast({ t: 'msg_delete', channel: m.channel, id: msg.id }, publicoDe(m.channel));
+      break;
+    }
+    case 'reagir': {
+      const msg = acharMsg(c, m.channel, m.id);
+      const emoji = str(m.emoji);
+      if (!msg || !c.uid || !emoji || emoji.length > 16 || [...emoji].length > 4) return;
+      const reacoes = (msg.reacoes ||= {});
+      const quem = reacoes[emoji] || [];
+      if (quem.includes(c.uid)) reacoes[emoji] = quem.filter((x) => x !== c.uid);
+      else if (quem.length || Object.keys(reacoes).length < 20) reacoes[emoji] = [...quem, c.uid];
+      if (!(reacoes[emoji] || []).length) delete reacoes[emoji];
+      save();
+      broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
       break;
     }
     case 'typing':
-      broadcast({ t: 'typing', channel: m.channel, id: c.id, name: c.name }, (o) => o !== c);
+      if (!podeVer(c, m.channel)) return;
+      broadcast({ t: 'typing', channel: m.channel, id: c.id, name: c.name }, (o) => o !== c && (!publicoDe(m.channel) || publicoDe(m.channel)(o)));
       break;
+    case 'channel_rename': {
+      const ch = db.channels.find((x) => x.id === m.id);
+      const name = str(m.name).trim().slice(0, 40);
+      if (!ch || !name) return;
+      ch.name = ch.kind === 'text' ? name.toLowerCase().replace(/\s+/g, '-') : name;
+      save();
+      broadcast({ t: 'channels', channels: db.channels });
+      break;
+    }
+    case 'sound_edit': {
+      const s = db.sounds.find((x) => x.id === m.id);
+      if (!s) return;
+      const name = str(m.name).trim().slice(0, 30);
+      const emoji = [...str(m.emoji).trim()].slice(0, 2).join('');
+      if (name) s.name = name;
+      if (emoji) s.emoji = emoji;
+      save();
+      broadcast({ t: 'sounds', sounds: db.sounds });
+      break;
+    }
+    case 'voice_kick': {
+      // sem administradores: qualquer um pode, e todos ficam sabendo quem fez
+      const o = clients.get(m.alvo);
+      if (!o || !o.voice) return;
+      send(o, { t: 'aviso', message: `${c.name} tirou você da sala de voz.` });
+      leaveVoice(o, true);
+      break;
+    }
+    case 'voice_move': {
+      const o = clients.get(m.alvo);
+      const ch = db.channels.find((x) => x.id === m.channel && x.kind === 'voice');
+      if (!o || !o.voice || !ch || o.voice === ch.id) return;
+      send(o, { t: 'mover', channel: ch.id, por: c.name });
+      break;
+    }
     case 'channel_create': {
       const name = str(m.name).trim().slice(0, 40);
       if (!name) return;
@@ -231,6 +507,10 @@ function onMessage(c, raw) {
     case 'channel_delete': {
       const i = db.channels.findIndex((x) => x.id === m.id);
       if (i < 0) return;
+      // sem nenhum canal de texto, o que alguém digitar some sem aviso
+      if (db.channels[i].kind === 'text' && db.channels.filter((x) => x.kind === 'text').length === 1) {
+        return send(c, { t: 'error', message: 'Precisa ficar pelo menos um canal de texto.' });
+      }
       const [ch] = db.channels.splice(i, 1);
       const arquivos = anexos(db.messages[ch.id] || []);
       delete db.messages[ch.id];
@@ -439,6 +719,7 @@ function handleRequest(req, res) {
       }
       save();
       json(res, 200, { id, name, size, mime });
+      if (compartilhado) setTimeout(migrarLocais, 1000);   // para os outros PCs também acharem o arquivo
     });
     req.on('error', () => { out.destroy(); fs.rm(dest, () => {}); });
     return;
@@ -571,10 +852,14 @@ function wsFrame(sock, op, payload) {
 }
 function wsSend(sock, text) { wsFrame(sock, 0x1, Buffer.from(text, 'utf8')); }
 
-// ping a cada 25 s; derruba conexões mortas
+// ping a cada 25 s; derruba conexões mortas. Tolera uma resposta atrasada: durante um upload grande
+// a internet de quem envia fica lotada e a resposta pode demorar, sem a conexão ter caído.
 setInterval(() => {
   for (const c of clients.values()) {
-    if (!c.alive) { c.sock.destroy(); onClose(c); continue; }
+    if (!c.alive) {
+      c.semResposta = (c.semResposta || 0) + 1;
+      if (c.semResposta >= 2) { c.sock.destroy(); onClose(c); continue; }
+    } else c.semResposta = 0;
     c.alive = false;
     wsFrame(c.sock, 0x9, Buffer.alloc(0));
   }
@@ -593,47 +878,89 @@ async function fazerBackup() {
     const copias = (await oneDrive.listar('backups')).filter((i) => i.name.startsWith('db-')).sort((a, b) => b.name.localeCompare(a.name));
     for (const velha of copias.slice(BACKUPS)) await oneDrive.apagar(velha.id);
   }
+  if (compartilhado) return;   // nesse modo os sons já moram no OneDrive
   for (const s of db.sounds) {
     const f = db.files[s.fileId];
     if (!f || f.remote || f.backup) continue;
-    await oneDrive.gravar(`backups/sons/${s.fileId}`, await fs.promises.readFile(path.join(FILES_DIR, s.fileId)));
+    const dados = await fs.promises.readFile(path.join(FILES_DIR, s.fileId)).catch(() => null);
+    if (!dados) continue;   // um som sem arquivo não pode travar o backup dos outros
+    await oneDrive.gravar(`backups/sons/${s.fileId}`, dados);
     f.backup = true;
     save();
   }
 }
 const backup = () => fazerBackup().catch((e) => console.error('Falha no backup do OneDrive:', e.message));
 
+async function conectarOneDrive() {
+  console.log('\n  Entre com a conta Microsoft que guarda os dados do grupo.');
+  console.log('  Todos os PCs que abrem o servidor precisam usar a MESMA conta. Se ela não for sua,');
+  console.log('  mande o código abaixo para o dono dela digitar no celular ou PC dele.');
+  await oneDrive.conectar(console.log);
+  console.log('  OneDrive conectado.');
+  try {
+    const dados = await criarCompartilhado({ oneDrive, aoPerder() {} }).lerBanco();
+    if (dados) console.log(`  Achei os dados do grupo nesta conta: ${contarMensagens(dados)} mensagens em ${(dados.channels || []).length} canais.`);
+    else console.log('  Esta conta ainda não tem dados do DJAchat: o servidor envia os deste PC ao abrir.');
+  } catch (e) { console.log(`  (não consegui conferir os dados agora: ${e.message})`); }
+  console.log('  Agora é só iniciar o servidor normalmente.\n');
+}
+
+async function iniciar() {
+  let senha = config.senha, segredo = config.segredo;
+  if (compartilhado) {
+    console.log('\n  Abrindo os dados do grupo no OneDrive...');
+    try {
+      const grupo = await iniciarCompartilhado();
+      senha = grupo.senha || senha;
+      segredo = grupo.segredo || segredo;
+      if (!turn && grupo.turn) turn = grupo.turn;
+    } catch (e) {
+      console.error(`\n  Não consegui abrir os dados do grupo: ${e.message}`);
+      if (e.codigo !== 'ocupado') console.error('  Confira a internet e tente de novo. Nada foi apagado.');
+      await compartilhado.liberar().catch(() => {});
+      process.exit(1);
+    }
+  }
+  definirSenha(senha, segredo);
+  purgeFiles(Object.keys(db.files));   // uploads que nunca viraram mensagem
+  for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(s, () => encerrar(0));
+  process.on('message', (m) => { if (m === 'encerrar') encerrar(0); });   // usado pelos testes
+
+  server.listen(PORT, HOST, () => {
+    setTimeout(backup, 60000);
+    setInterval(backup, 6 * 3600000);
+    renovarIce();
+    setInterval(renovarIce, 12 * 3600000);
+    if (compartilhado) { setTimeout(migrarLocais, 5000); setInterval(migrarLocais, 10 * 60000); }
+    if (TUNEL) {
+      iniciarTunel(PORT,
+        (url) => console.log(`\n  ==== Endereço para os amigos: ${url} ====\n`),
+        (m) => console.error(`  ${m}`));
+    }
+    const nets = require('os').networkInterfaces();
+    const ips = Object.values(nets).flat().filter((n) => n && n.family === 'IPv4' && !n.internal).map((n) => n.address);
+    console.log(`\n  DJAchat rodando na porta ${PORT}${SENHA ? ' (com senha)' : ''}`);
+    if (TUNEL) console.log('  Abrindo o endereço público...');
+    else {
+      console.log('  Endereços para os amigos:');
+      for (const ip of ips) console.log(`    ${ip}:${PORT}`);
+    }
+    if (!SENHA) console.log('\n  ATENÇÃO: servidor SEM senha. Use só em rede de confiança.');
+    else if (!process.env.SENHA) console.log(`\n  Senha do servidor: ${SENHA}`);
+    console.log(`  OneDrive: ${compartilhado ? `conectado, com os dados do grupo (${contarMensagens(db)} mensagens)` : 'desligado (arquivos e conversas ficam só neste PC)'}`);
+    if (TUNEL && !turn) console.log('  TURN: não configurado (a voz pode falhar entre algumas conexões)');
+    console.log('');
+  });
+}
+
 if (process.argv.includes('--conectar-onedrive')) {
-  oneDrive.conectar(console.log)
-    .then(() => { console.log('  OneDrive conectado. Agora é só iniciar o servidor normalmente.\n'); process.exit(0); })
+  conectarOneDrive()
+    .then(() => process.exit(0))
     .catch((e) => { console.error(`  Não consegui conectar: ${e.message}`); process.exit(1); });
 } else if (process.argv.includes('--configurar-turn')) {
   const i = process.argv.indexOf('--configurar-turn');
-  config.turn = { id: process.argv[i + 1], token: process.argv[i + 2] };
+  config.turn = turn = { id: process.argv[i + 1], token: process.argv[i + 2] };
   atualizarIce()
     .then(() => { salvarConfig(); console.log('\n  TURN configurado.\n'); process.exit(0); })
     .catch((e) => { console.error(`  Não consegui configurar o TURN: ${e.message}`); process.exit(1); });
-} else server.listen(PORT, HOST, () => {
-  setTimeout(backup, 60000);
-  setInterval(backup, 6 * 3600000);
-  renovarIce();
-  setInterval(renovarIce, 12 * 3600000);
-  if (TUNEL) {
-    iniciarTunel(PORT,
-      (url) => console.log(`\n  ==== Endereço para os amigos: ${url} ====\n`),
-      (m) => console.error(`  ${m}`));
-  }
-  const nets = require('os').networkInterfaces();
-  const ips = Object.values(nets).flat().filter((n) => n && n.family === 'IPv4' && !n.internal).map((n) => n.address);
-  console.log(`\n  DJAchat rodando na porta ${PORT}${SENHA ? ' (com senha)' : ''}`);
-  if (TUNEL) console.log('  Abrindo o endereço público...');
-  else {
-    console.log('  Endereços para os amigos:');
-    for (const ip of ips) console.log(`    ${ip}:${PORT}`);
-  }
-  if (!SENHA) console.log('\n  ATENÇÃO: servidor SEM senha. Use só em rede de confiança.');
-  else if (!process.env.SENHA) console.log(`\n  Senha do servidor: ${SENHA}`);
-  console.log(`  OneDrive: ${oneDrive.ativo ? 'conectado' : 'desligado (arquivos ficam neste servidor)'}`);
-  if (TUNEL && !config.turn) console.log('  TURN: não configurado (a voz pode falhar entre algumas conexões)');
-  console.log('');
-});
+} else iniciar();

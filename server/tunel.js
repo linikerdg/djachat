@@ -32,9 +32,8 @@ function iniciarTunel(porta, aoObterEndereco, avisar) {
   }
   abrir();
 
-  const encerrar = () => { encerrando = true; if (filho) filho.kill(); };
-  process.on('exit', encerrar);
-  for (const sinal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sinal, () => process.exit(0));
+  // o servidor trata Ctrl+C e o fechamento da janela (para salvar antes de sair); aqui só fecha o túnel junto
+  process.on('exit', () => { encerrando = true; if (filho) filho.kill(); });
 }
 
 module.exports = { iniciarTunel };

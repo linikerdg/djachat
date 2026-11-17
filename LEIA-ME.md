@@ -14,7 +14,8 @@ djachat/
 
 - **Um de vocês é o "host"** e deixa o servidor rodando no PC dele. O servidor guarda as mensagens, os arquivos e os sons. Ele também avisa quem está em cada sala.
 - **Voz e tela vão direto de PC para PC** (WebRTC), sem passar pelo servidor. Por isso a latência é baixa, mas cada pessoa envia o próprio áudio e vídeo para cada uma das outras. Funciona bem com **até umas 6 a 8 pessoas na mesma sala**. A tela compartilhada pesa mais no upload de quem transmite.
-- Os dados ficam em `server/data/` (`db.json` + pasta `files/`). Para fazer backup, é só copiar essa pasta.
+- Sem OneDrive, os dados ficam em `server/data/` (`db.json` + pasta `files/`). Para fazer backup, é só copiar essa pasta.
+- Com OneDrive, as conversas, os canais, os sons, os arquivos e a senha ficam no OneDrive. Qualquer amigo pode abrir o servidor no PC dele e todos veem os mesmos dados (veja a seção OneDrive).
 
 ---
 
@@ -91,6 +92,14 @@ O arquivo `desktop/dist/DJAchat-Instalador.exe` instala o app sem pedir administ
 | Assistir à tela de alguém | aparece na sala; `⤢` foca, `⛶` ou duplo clique deixa em tela cheia |
 | Soundboard | botão **🎵 Sons**: adicione mp3/ogg/wav (até 3 MB) com um emoji, e quem está na sala ouve |
 | Microfone, saída de áudio, ruído, qualidade da tela | ⚙️ Configurações |
+| Opções de uma pessoa (volume até 200%, mutar só para você, mensagem direta, mencionar, mover ou tirar da sala) | clique direito na pessoa |
+| Responder, reagir, editar ou apagar a sua mensagem | clique direito na mensagem |
+| Baixar, abrir ou copiar um anexo | clique direito no anexo |
+| Renomear, silenciar ou marcar canal como lido | clique direito no canal |
+| Renomear, trocar emoji ou ouvir um som só para você | clique direito no som |
+| Volume do som da tela, janela flutuante | clique direito na tela que está assistindo |
+| Fechar a janela | o X deixa o app na bandeja do sistema (dá para mudar em ⚙️ → Janela e app); para sair, clique direito no ícone da bandeja → Sair |
+| Zoom, tela cheia, recarregar | ⚙️ → Janela e app (ou Ctrl +, Ctrl −, Ctrl 0 e F11) |
 
 ## Sem VPN (Cloudflare Tunnel)
 
@@ -105,18 +114,19 @@ node server.js --configurar-turn ID_DA_CHAVE TOKEN_DA_CHAVE
 
 A chave fica em `server/data/config.json`, fora do git. Sem OneDrive, os uploads pelo túnel ficam limitados a 100 MB.
 
-## OneDrive (opcional)
+## OneDrive (opcional): os mesmos dados em qualquer PC
 
-Com o OneDrive conectado, os arquivos enviados no chat vão direto para a pasta do app no OneDrive do host, sem usar a internet dele. O servidor faz uma cópia das conversas e dos sons a cada 6 horas e mantém as últimas 30.
+Com o OneDrive conectado, ele passa a guardar tudo do grupo: conversas, canais, sons, arquivos e a senha do servidor. Assim, não importa quem abre o servidor: os dados são sempre os mesmos. Os arquivos do chat vão direto do app para o OneDrive, sem usar a internet de quem hospeda. O servidor também guarda uma cópia das conversas a cada 6 horas e mantém as últimas 30.
 
-O app só acessa a própria pasta (`Aplicativos/DJAchat`), nunca os demais arquivos da conta. Para conectar, rode uma vez e siga o código mostrado no terminal:
+O app só acessa a própria pasta (`Aplicativos/DJAchat`), nunca os demais arquivos da conta.
 
-```bash
-cd server
-node server.js --conectar-onedrive
-```
+**Conectar (uma vez em cada PC que vai hospedar):** dê dois cliques em **`conectar-onedrive.bat`** e siga o código mostrado. Todos os PCs precisam usar a **mesma conta Microsoft**, a do dono dos dados. Se um amigo for hospedar, ele roda o `.bat` no PC dele e manda o código para o dono da conta, que digita em microsoft.com/devicelogin no celular ou PC dele. Ninguém precisa passar senha para ninguém. No fim, o terminal confirma quantas mensagens achou na conta.
 
-A autorização fica em `server/data/config.json`, fora do git. Os uploads no OneDrive têm limite total de 200 GB; para mudar, use `LIMITE_ONEDRIVE_GB`. Sem OneDrive, ou se ele estiver fora do ar na hora do envio, os arquivos ficam no servidor.
+**Só um servidor por vez.** Quem abre o servidor segura uma trava no OneDrive. Se outro PC tentar abrir junto, aparece "o servidor já está aberto em ...". Se o PC que hospedava desligou sem fechar o servidor, espere 2 minutos e abra de novo. Feche o servidor pela janela (ou com Ctrl+C) para ele enviar as últimas mudanças e liberar a trava na hora.
+
+Na primeira vez, o servidor envia para o OneDrive as conversas e os arquivos que já estavam no PC. Se um PC tinha conversas diferentes das do OneDrive, valem as do OneDrive, e as dele ficam guardadas em `server/data/db.so-neste-pc-....json`. A senha é a do grupo: o terminal mostra qual é ao iniciar. A chave do TURN de quem conectou primeiro também fica disponível para os outros servidores, a menos que eles tenham a própria.
+
+A autorização de cada PC fica em `server/data/config.json`, fora do git. Os uploads no OneDrive têm limite total de 200 GB; para mudar, use `LIMITE_ONEDRIVE_GB`. Se o OneDrive estiver fora do ar na hora de um envio, o arquivo fica no servidor e sobe sozinho depois.
 
 ## Problemas comuns
 
@@ -124,9 +134,13 @@ A autorização fica em `server/data/config.json`, fora do git. Os uploads no On
 - **Entrou na sala mas não ouve ninguém**: geralmente é firewall ou falta de VPN. Com Radmin, Tailscale ou ZeroTier quase sempre resolve.
 - **Eco**: use fone de ouvido. O cancelamento de eco ajuda, mas não faz milagre.
 - **Tela travando**: em ⚙️, baixe a qualidade para 720p. Quem transmite precisa de bom upload.
+- **"O servidor já está aberto em ..."**: outro PC está hospedando com os dados do OneDrive. Feche aquele servidor primeiro; se ele caiu sem fechar, espere 2 minutos.
+- **"Não consegui abrir os dados do grupo"**: o servidor não falou com o OneDrive. Confira a internet e abra de novo; nada é apagado.
 
 ## Segurança
 
 O tráfego entre o app e o servidor não é criptografado (HTTP). Para uso entre amigos **dentro de uma VPN** isso é ok, porque a própria VPN já criptografa tudo. Não exponha o servidor direto na internet sem um proxy com HTTPS, porque a senha e as mensagens trafegariam abertas.
 
-Ainda não existem contas nem permissões: quem tem a senha pode usar qualquer apelido e apagar canais e sons.
+Cada app tem uma **conta leve**: um código secreto guardado no PC. O primeiro código que entra com um apelido fica dono dele, e só ele lê as próprias mensagens diretas e edita ou apaga as próprias mensagens. Para usar o mesmo apelido em outro PC, copie o código em ⚙️ Configurações → Sua conta e cole no outro. Se o código se perder (por exemplo, ao reinstalar o Windows), o apelido fica preso a ele.
+
+Ainda não há administradores: quem tem a senha do servidor pode apagar e renomear canais e sons, e tirar ou mover pessoas da sala. Nesses casos, o app avisa quem fez.
