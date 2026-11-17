@@ -384,7 +384,7 @@ function onMessage(c, raw) {
     }
     c.name = nome;
     c.color = COR(nome);
-    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], sounds: db.sounds, users: users() });
+    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
     pushUsers();
     return;
   }
@@ -493,6 +493,12 @@ function onMessage(c, raw) {
       const ch = db.channels.find((x) => x.id === m.channel && x.kind === 'voice');
       if (!o || !o.voice || !ch || o.voice === ch.id) return;
       send(o, { t: 'mover', channel: ch.id, por: c.name });
+      break;
+    }
+    case 'codigo_hospedagem': {
+      // qualquer membro pode levar o servidor para outro PC; o código só abre com a senha do grupo
+      if (!compartilhado || !compartilhado.ativa || !SENHA) return send(c, { t: 'error', message: 'Este servidor não usa o OneDrive, então não há código para hospedar.' });
+      send(c, { t: 'codigo_hospedagem', codigo: gerarCodigoHospedagem() });
       break;
     }
     case 'channel_create': {
@@ -891,12 +897,56 @@ async function fazerBackup() {
 }
 const backup = () => fazerBackup().catch((e) => console.error('Falha no backup do OneDrive:', e.message));
 
+// ---------------------------------------------------------------- código de hospedagem
+// Leva a autorização do OneDrive para outro PC sem o dono da conta precisar entrar de novo.
+// Vai criptografado com a senha do grupo (AES-256-GCM, chave por scrypt): só quem sabe a senha usa.
+const PREFIXO_CODIGO = 'DJA1.';
+const chaveDoCodigo = (senha, sal) => crypto.scryptSync(String(senha), sal, 32, { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+function gerarCodigoHospedagem() {
+  const sal = crypto.randomBytes(16), iv = crypto.randomBytes(12);
+  const cifra = crypto.createCipheriv('aes-256-gcm', chaveDoCodigo(SENHA, sal), iv);
+  const dados = Buffer.concat([cifra.update(JSON.stringify({ rt: config.onedrive.refresh_token })), cifra.final()]);
+  return PREFIXO_CODIGO + Buffer.concat([sal, iv, cifra.getAuthTag(), dados]).toString('base64url');
+}
+function abrirCodigoHospedagem(codigo, senha) {
+  const texto = String(codigo).trim();
+  if (!texto.startsWith(PREFIXO_CODIGO)) throw new Error('isso não parece um código de hospedagem do DJAchat');
+  const bruto = Buffer.from(texto.slice(PREFIXO_CODIGO.length), 'base64url');
+  if (bruto.length < 45) throw new Error('o código está incompleto');
+  const sal = bruto.subarray(0, 16), iv = bruto.subarray(16, 28), tag = bruto.subarray(28, 44);
+  const decifra = crypto.createDecipheriv('aes-256-gcm', chaveDoCodigo(senha, sal), iv);
+  decifra.setAuthTag(tag);
+  try { return JSON.parse(Buffer.concat([decifra.update(bruto.subarray(44)), decifra.final()]).toString('utf8')); }
+  catch { throw new Error('senha errada ou código incompleto'); }
+}
+function perguntar(texto) {
+  const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((r) => rl.question(texto, (v) => { rl.close(); r(v.trim()); }));
+}
+const valorDoArg = (nome) => { const i = process.argv.indexOf(nome); return i >= 0 ? process.argv[i + 1] : undefined; };
+
 async function conectarOneDrive() {
-  console.log('\n  Entre com a conta Microsoft que guarda os dados do grupo.');
-  console.log('  Todos os PCs que abrem o servidor precisam usar a MESMA conta. Se ela não for sua,');
-  console.log('  mande o código abaixo para o dono dela digitar no celular ou PC dele.');
-  await oneDrive.conectar(console.log);
-  console.log('  OneDrive conectado.');
+  let codigo = valorDoArg('--codigo');
+  if (codigo === undefined) {
+    console.log('\n  Para hospedar o DJAchat neste PC:');
+    console.log('  - Se alguém do grupo já usa o OneDrive: no app, em Configurações, clique em');
+    console.log('    "Copiar código para hospedar" e cole o código aqui.');
+    console.log('  - Se é a primeira vez do grupo: só aperte Enter para entrar com a conta Microsoft.\n');
+    codigo = await perguntar('  Código de hospedagem: ');
+  }
+  if (codigo) {
+    const senha = valorDoArg('--senha-grupo') ?? await perguntar('  Senha do servidor do grupo: ');
+    const dados = abrirCodigoHospedagem(codigo, senha);
+    config.onedrive = { refresh_token: dados.rt };
+    try { await oneDrive.lerJson('estado/config.json'); }
+    catch (e) { delete config.onedrive; throw new Error(`o OneDrive recusou a autorização do código (${e.message})`); }
+    salvarConfig();
+    console.log('\n  Pronto: este PC está ligado ao OneDrive do grupo.');
+  } else {
+    console.log('\n  Entre com a conta Microsoft que vai guardar os dados do grupo.');
+    await oneDrive.conectar(console.log);
+    console.log('  OneDrive conectado.');
+  }
   try {
     const dados = await criarCompartilhado({ oneDrive, aoPerder() {} }).lerBanco();
     if (dados) console.log(`  Achei os dados do grupo nesta conta: ${contarMensagens(dados)} mensagens em ${(dados.channels || []).length} canais.`);

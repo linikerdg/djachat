@@ -1,7 +1,7 @@
 {
   "name": "djachat",
   "productName": "DJAchat",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Chat, voz, soundboard e tela para a galera",
   "main": "main.js",
   "scripts": {

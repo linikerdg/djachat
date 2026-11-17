@@ -97,6 +97,7 @@ function handle(m) {
       } else toast(m.message);
       break;
     case 'aviso': toast(m.message); break;
+    case 'codigo_hospedagem': copiarTexto(m.codigo, 'Código copiado. No outro PC, abra o conectar-onedrive.bat e cole.'); break;
     case 'mover': toast(`${m.por} moveu você de sala.`); joinVoice(m.channel); break;
     case 'dms': {
       // a lista do servidor vale; conversas abertas aqui e ainda sem mensagem continuam
@@ -124,7 +125,7 @@ function handle(m) {
       S.pass = ''; LS.set('session', m.session);
       soundCache.clear();   // os endereços dos sons levam o servidor e o token: trocando de servidor, mudam
       if (m.ice) S.ice = m.ice;
-      S.channels = m.channels; S.sounds = m.sounds; S.users = m.users; S.dms = m.dms || [];
+      S.channels = m.channels; S.sounds = m.sounds; S.users = m.users; S.dms = m.dms || []; S.hospedavel = !!m.hospedavel;
       $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
       $('#connDot').className = 'dot ok'; $('#connDot').title = 'Conectado';
       $('#meName').textContent = S.me.name; paintAvatar($('#meAvatar'), S.me);
@@ -1216,6 +1217,14 @@ $('#btnSettings').onclick = async () => {
     });
   };
   linhaConta.append(bCopiar, bUsar); conta.append(linhaConta); body.append(conta);
+  if (S.hospedavel) {
+    // leva o servidor para outro PC sem refazer a conexão com o OneDrive
+    const hosp = el('div', 'conta');
+    hosp.append(el('label', null, 'Hospedar em outro PC'), el('div', 'muted small', 'Copie este código e cole no conectar-onedrive.bat do PC que vai hospedar. Ele só funciona junto com a senha do servidor, e liga aquele PC aos dados do grupo no OneDrive.'));
+    const bHosp = el('button'); bHosp.type = 'button'; rotular(bHosp, 'copy', 'Copiar código para hospedar'); bHosp.id = 'btnCodigoHospedar';
+    bHosp.onclick = () => send({ t: 'codigo_hospedagem' });
+    const linhaHosp = el('div', 'row'); linhaHosp.append(bHosp); hosp.append(linhaHosp); body.append(hosp);
+  }
   if (desktop && desktop.janela) body.append(opcoesDaJanela());
   const out = el('button', null, 'Sair da conta'); out.style.marginTop = '18px';
   out.onclick = () => { $('#modal').classList.add('hidden'); cleanup(); S.wantVoice = null; LS.set('session', ''); if (S.voice) { send({ t: 'voice_leave' }); teardownVoice(); } const w = S.ws; S.me = null; S.ws = null; w && w.close(); showLogin(); };
