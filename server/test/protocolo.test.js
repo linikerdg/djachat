@@ -148,3 +148,28 @@ test('upload e download de arquivo exigem o token', async () => {
   assert.equal(await d.text(), 'conteúdo de teste');
   a.fechar();
 });
+
+test('mensagens antigas vêm em páginas', async () => {
+  const a = await entrar(srv, 'Paulo');
+  a.mandar({ t: 'channel_create', name: 'paginas', kind: 'text' });
+  const ch = (await a.esperar('channels', (x) => x.channels.some((c) => c.name === 'paginas'))).channels.find((c) => c.name === 'paginas');
+  for (let i = 1; i <= 230; i++) a.mandar({ t: 'msg', channel: ch.id, text: 'n' + i });
+  await a.esperar('msg', (x) => x.message.text === 'n230', 5000);
+  a.mandar({ t: 'history', channel: ch.id });
+  const p1 = await a.esperar('history', (x) => x.channel === ch.id);
+  assert.equal(p1.messages.length, 100);
+  assert.equal(p1.messages[0].text, 'n131');
+  assert.equal(p1.mais, true);
+  a.mandar({ t: 'history', channel: ch.id, antes: p1.messages[0].id });
+  const p2 = await a.esperar('history', (x) => x.antes === p1.messages[0].id);
+  assert.equal(p2.messages[0].text, 'n31');
+  assert.equal(p2.messages[99].text, 'n130');
+  a.mandar({ t: 'history', channel: ch.id, antes: p2.messages[0].id });
+  const p3 = await a.esperar('history', (x) => x.antes === p2.messages[0].id);
+  assert.equal(p3.messages.length, 30);
+  assert.equal(p3.mais, false);
+  // ao entrar de novo, o app sabe qual foi a última mensagem do canal
+  const b = await entrar(srv, 'Paulo', { chave: a.chave });
+  assert.equal(b.welcome.ultimas[ch.id].uid, a.me.uid);
+  a.fechar(); b.fechar();
+});

@@ -270,3 +270,28 @@ body.com-barra .modal { top: 32px; }
 body.com-barra .modal-card { max-height: calc(100vh - 32px - 6vh); }
 .modal-actions { position: sticky; bottom: -22px; background: var(--bg2); margin: 20px -22px -22px; padding: 12px 22px 22px; border-top: 1px solid var(--bg3); }
 .botoes-janela #jMaximizar .ic { width: 14px; height: 14px; }
+
+/* ---------- formatação, menções, novas mensagens ---------- */
+.msg .text b { font-weight: 700; }
+.msg .text .codigo { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; background: var(--bg0); padding: 1px 5px; border-radius: 4px; }
+.msg .text .bloco-codigo { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; background: var(--bg0); border: 1px solid var(--line); padding: 8px 10px; border-radius: 6px; margin: 4px 0; white-space: pre-wrap; overflow-x: auto; }
+.msg .text .citacao { border-left: 3px solid var(--bg4); padding-left: 10px; margin: 2px 0; color: var(--muted); }
+.msg .text .spoiler { background: var(--bg4); color: transparent; border-radius: 4px; cursor: pointer; padding: 0 2px; }
+.msg .text .spoiler * { color: transparent; }
+.msg .text .spoiler.visto { background: var(--bg3); color: inherit; cursor: auto; }
+.msg .text .spoiler.visto * { color: inherit; }
+.mencao { background: #d8b45f22; color: var(--accent-hover); border-radius: 4px; padding: 0 2px; font-weight: 600; }
+.mencao.eu { background: #d8b45f44; }
+.msg.mencionado { background: #d8b45f14; box-shadow: inset 3px 0 0 var(--accent); }
+.msg.mencionado:hover { background: #d8b45f20; }
+.selo-mencao { margin-left: auto; background: var(--red); color: var(--on-accent); font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: grid; place-items: center; }
+.chan .selo-mencao + .del { margin-left: 0; }
+.novas { display: flex; align-items: center; gap: 8px; margin: 14px 16px 2px; color: var(--red); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.novas::before, .novas::after { content: ""; flex: 1; height: 1px; background: var(--red); opacity: .7; }
+.inicio-canal { text-align: center; padding: 8px 16px 0; }
+/* lista do @ ao digitar */
+#sugestoes { position: absolute; left: 16px; right: 16px; bottom: 74px; background: var(--bg0); border: 1px solid var(--bg4); border-radius: 8px; box-shadow: 0 8px 24px #000a; padding: 5px; z-index: 15; max-height: 240px; overflow-y: auto; }
+#sugestoes .titulo { padding: 4px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); }
+#sugestoes .opcao { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; background: none; border-radius: 5px; text-align: left; }
+#sugestoes .opcao .avatar { width: 22px; height: 22px; font-size: 11px; }
+#sugestoes .opcao.sel { background: var(--bg4); }

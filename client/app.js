@@ -19,6 +19,10 @@ const S = {
   messages: {},            // channelId -> [msg]
   loaded: new Set(),       // canais cujo histórico já veio do servidor
   unread: new Set(),
+  mencoes: {},             // channelId -> quantas menções a mim ainda não vistas
+  mais: {},                // channelId -> true se há mensagens mais antigas no servidor
+  lidas: LS.get('lidas', {}),   // channelId -> ts da última mensagem que eu vi
+  lidaAoAbrir: null,          // até onde eu tinha lido quando abri o canal atual (linha "novas mensagens")
   typing: {},              // channelId -> { id: {name, until} }
   voice: null,             // id do canal de voz em que estou
   muted: LS.get('muted', false), deafened: false,
@@ -129,7 +133,8 @@ function handle(m) {
       $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
       $('#connDot').className = 'dot ok'; $('#connDot').title = 'Conectado';
       $('#meName').textContent = S.me.name; paintAvatar($('#meAvatar'), S.me);
-      S.messages = {}; S.loaded = new Set();
+      S.messages = {}; S.loaded = new Set(); S.mais = {};
+      marcarNaoLidas(m.ultimas || {});
       const first = canalInfo(LS.get('lastChannel')) || S.channels.find((c) => c.kind === 'text');
       if (first) openText(first.id);
       renderChannels(); renderMembers(); renderSounds();
@@ -158,18 +163,36 @@ function handle(m) {
       break;
     }
     case 'history':
+      if (m.antes) {
+        // página de mensagens antigas: entra no começo, sem mexer na posição de leitura
+        S.carregandoAntigas = false;
+        const atual = S.messages[m.channel] || [];
+        if (!atual.length || atual[0].id !== m.antes) break;   // a lista mudou nesse meio-tempo
+        S.messages[m.channel] = m.messages.concat(atual);
+        S.mais[m.channel] = !!m.mais;
+        if (m.channel === S.current && S.view === 'text') renderMessages('topo');
+        break;
+      }
       S.messages[m.channel] = m.messages;
+      S.mais[m.channel] = !!m.mais;
       S.loaded.add(m.channel);
-      if (m.channel === S.current) renderMessages();
+      if (m.channel === S.current) { renderMessages(); marcarLido(m.channel); }
       break;
     case 'msg': {
       const msg = m.message;
       (S.messages[msg.channel] ||= []).push(msg);
       if (S.typing[msg.channel]) delete S.typing[msg.channel][msg.authorId];
-      if (msg.channel === S.current && S.view === 'text') appendMessage(msg);
-      else if (!souEu(msg)) { S.unread.add(msg.channel); renderChannels(); }
-      if (!souEu(msg) && !S.silenciados.has(msg.channel) && (!document.hasFocus() || msg.channel !== S.current)) {
-        playTone('msg');
+      const vendo = msg.channel === S.current && S.view === 'text';
+      const mencao = !souEu(msg) && mencionaNome(msg.text, S.me.name);
+      if (vendo) { appendMessage(msg); if (document.hasFocus()) marcarLido(msg.channel); }
+      if (!souEu(msg) && !vendo) {
+        S.unread.add(msg.channel);
+        if (mencao) S.mencoes[msg.channel] = (S.mencoes[msg.channel] || 0) + 1;
+        renderChannels();
+      }
+      // menção toca mesmo em canal silenciado
+      if (!souEu(msg) && (mencao || !S.silenciados.has(msg.channel)) && (!document.hasFocus() || msg.channel !== S.current)) {
+        playTone(mencao ? 'mencao' : 'msg');
         if (window.djachatDesktop) window.djachatDesktop.flash();
       }
       renderTyping();
@@ -219,6 +242,7 @@ function renderChannels() {
     row.append(av, el('span', 'name', d.name));
     if (d.id === S.current && S.view === 'text') row.classList.add('active');
     if (S.unread.has(d.id)) row.classList.add('unread');
+    seloMencoes(row, d.id);
     row.onclick = () => openText(d.id);
     row.oncontextmenu = (e) => menuCanal(e, d);
     dl.append(row);
@@ -236,6 +260,7 @@ function renderChannels() {
     if (ch.kind === 'text') {
       if (ch.id === S.current && S.view === 'text') row.classList.add('active');
       if (S.unread.has(ch.id)) row.classList.add('unread');
+      seloMencoes(row, ch.id);
       row.onclick = () => openText(ch.id);
       tc.append(row);
     } else {
@@ -293,7 +318,9 @@ function paintAvatar(node, u) {
 
 // ================================================================ texto
 function openText(id) {
-  S.current = id; S.view = 'text'; S.unread.delete(id); LS.set('lastChannel', id);
+  // linha "novas mensagens" só quando o canal tinha coisa não lida
+  S.lidaAoAbrir = S.unread.has(id) ? (S.lidas[id] || 0) : null;
+  S.current = id; S.view = 'text'; S.unread.delete(id); delete S.mencoes[id]; LS.set('lastChannel', id);
   const ch = canalInfo(id);
   $('#chanTitle').replaceChildren(ic(ch && ch.kind === 'dm' ? 'at-sign' : 'hash'), ch ? ch.name : '');
   $('#chanSub').textContent = ch && ch.kind === 'dm' ? 'mensagem direta' : '';
@@ -301,18 +328,75 @@ function openText(id) {
   if (S.respondendo && S.respondendo.canal !== id) cancelarResposta();
   renderChannels();
   renderAnexos();   // atualiza o texto de ajuda da caixa para este canal
-  if (S.loaded.has(id)) renderMessages(); else { $('#messages').replaceChildren(); send({ t: 'history', channel: id }); }
+  if (S.loaded.has(id)) { renderMessages(); marcarLido(id); } else { $('#messages').replaceChildren(); send({ t: 'history', channel: id }); }
   renderTyping();
   $('#msgInput').focus();
 }
 
 let lastRendered = null;
+// manterPosicao: true = fica onde está; 'topo' = entraram mensagens antigas em cima (a mesma mensagem continua à vista)
 function renderMessages(manterPosicao) {
   const box = $('#messages');
-  const pos = box.scrollTop;
+  const pos = box.scrollTop, doFim = box.scrollHeight - box.scrollTop;
   box.replaceChildren(); lastRendered = null;
-  for (const m of S.messages[S.current] || []) appendMessage(m, true);
-  box.scrollTop = manterPosicao ? pos : box.scrollHeight;
+  const lista = S.messages[S.current] || [];
+  if (lista.length) box.append(el('div', 'inicio-canal muted small', S.mais[S.current] ? 'Role para cima para ver mensagens mais antigas' : 'Este é o começo da conversa.'));
+  let novas = null;
+  for (const m of lista) {
+    if (!novas && S.lidaAoAbrir !== null && m.ts > S.lidaAoAbrir && !souEu(m)) {
+      novas = el('div', 'novas'); novas.append(el('span', null, 'novas mensagens'));
+      box.append(novas);
+      // a primeira depois da linha mostra o autor de novo, sem repetir a data
+      if (lastRendered) lastRendered = { ts: lastRendered.ts };
+    }
+    appendMessage(m, true);
+  }
+  if (manterPosicao === 'topo') box.scrollTop = box.scrollHeight - doFim;
+  else if (manterPosicao) box.scrollTop = pos;
+  else if (novas && novas.offsetTop > box.clientHeight) box.scrollTop = novas.offsetTop - 60;   // abre nas novas
+  else box.scrollTop = box.scrollHeight;
+}
+// Rolou até o topo: pede a página anterior
+$('#messages').addEventListener('scroll', () => {
+  const box = $('#messages');
+  const lista = S.messages[S.current];
+  if (box.scrollTop > 150 || S.carregandoAntigas || !S.mais[S.current] || !lista || !lista.length) return;
+  S.carregandoAntigas = true;
+  send({ t: 'history', channel: S.current, antes: lista[0].id });
+  setTimeout(() => { S.carregandoAntigas = false; }, 5000);   // sem resposta: deixa tentar de novo
+});
+
+// ---------------------------------------------------------------- lidas e menções
+function marcarLido(canal) {
+  const l = S.messages[canal];
+  const ultima = l && l[l.length - 1];
+  if (!ultima || (S.lidas[canal] || 0) >= ultima.ts) return;
+  S.lidas[canal] = ultima.ts;
+  LS.set('lidas', S.lidas);
+}
+// Ao entrar: o que chegou desde a última vez fica como não lido
+function marcarNaoLidas(ultimas) {
+  if (!Object.keys(S.lidas).length) {
+    // primeira vez neste PC: tudo começa como lido
+    for (const [id, u] of Object.entries(ultimas)) S.lidas[id] = u.ts;
+    LS.set('lidas', S.lidas);
+    return;
+  }
+  for (const [id, u] of Object.entries(ultimas)) {
+    if (u.ts > (S.lidas[id] || 0) && u.uid !== S.me.uid) S.unread.add(id);
+  }
+}
+window.addEventListener('focus', () => { if (S.current && S.view === 'text') marcarLido(S.current); });
+function seloMencoes(row, id) {
+  const n = S.mencoes[id];
+  if (n) row.append(el('span', 'selo-mencao', n > 9 ? '9+' : String(n)));
+}
+// apelidos que o app conhece: quem está online, as conversas diretas e quem escreveu no canal aberto
+function nomesConhecidos() {
+  const nomes = new Set(S.users.map((u) => u.name));
+  for (const d of S.dms) nomes.add(d.name);
+  for (const m of S.messages[S.current] || []) nomes.add(m.author);
+  return [...nomes];
 }
 
 const mesmoAutor = (a, b) => (a.uid || a.authorId) === (b.uid || b.authorId) && a.author === b.author;
@@ -345,7 +429,8 @@ function criarLinha(m, grouped) {
     body.append(r);
   }
   if (m.text) {
-    const t = el('div', 'text'); linkify(t, m.text);
+    const t = el('div', 'text'); formatar(t, m.text, { nomes: nomesConhecidos(), meuNome: S.me.name });
+    if (!souEu(m) && mencionaNome(m.text, S.me.name)) row.classList.add('mencionado');
     if (m.editada) t.append(el('span', 'editada', ' (editada)'));
     body.append(t);
   }
@@ -393,16 +478,6 @@ function appendMessage(m, bulk) {
   if (!bulk && (nearBottom || souEu(m))) box.scrollTop = box.scrollHeight;
   // imagens carregam depois e mudam a altura
   if (!bulk) row.querySelectorAll('img').forEach((i) => (i.onload = () => { if (nearBottom) box.scrollTop = box.scrollHeight; }));
-}
-
-function linkify(node, text) {
-  const re = /(https?:\/\/[^\s<]+)/g; let last = 0, mm;
-  while ((mm = re.exec(text))) {
-    node.append(text.slice(last, mm.index));
-    const a = el('a', null, mm[1]); a.href = mm[1]; a.target = '_blank'; a.rel = 'noreferrer';
-    node.append(a); last = mm.index + mm[1].length;
-  }
-  node.append(text.slice(last));
 }
 
 const fileUrl = (id, download) => `${S.base}/files/${id}?t=${S.token}${download ? '&download=1' : ''}`;
@@ -557,6 +632,70 @@ tv.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; $('#drop
 // soltar um arquivo fora da área do chat não pode abrir o arquivo no lugar do app
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
+// ---------------------------------------------------------------- @ ao digitar: lista de apelidos
+const sug = { lista: [], sel: 0, ini: -1, no: null };
+function fecharSugestoes() {
+  if (sug.no) { sug.no.remove(); sug.no = null; }
+  sug.lista = []; sug.sel = 0;
+}
+function atualizarSugestoes() {
+  const pos = input.selectionStart;
+  if (pos !== input.selectionEnd) return fecharSugestoes();
+  const m = /(^|\s)@([^\s@]{0,32})$/.exec(input.value.slice(0, pos));
+  if (!m) return fecharSugestoes();
+  const q = m[2].toLowerCase();
+  const online = new Set(S.users.map((u) => u.name));
+  const lista = nomesConhecidos().filter((n) => n !== S.me.name && n.toLowerCase().startsWith(q))
+    .sort((a, b) => (online.has(b) - online.has(a)) || a.localeCompare(b)).slice(0, 8);
+  if ('todos'.startsWith(q)) lista.push('todos');
+  if (!lista.length) return fecharSugestoes();
+  sug.lista = lista; sug.ini = pos - m[2].length - 1; sug.sel = Math.min(sug.sel, lista.length - 1);
+  if (!sug.no) { sug.no = el('div'); sug.no.id = 'sugestoes'; $('#textView').append(sug.no); }
+  sug.no.replaceChildren(el('div', 'titulo', 'Mencionar'));
+  lista.forEach((nome, i) => {
+    const b = el('button', 'opcao' + (i === sug.sel ? ' sel' : '')); b.type = 'button';
+    const u = S.users.find((x) => x.name === nome);
+    const av = el('div', 'avatar');
+    if (nome === 'todos') av.append(ic('at-sign')); else paintAvatar(av, u || { name: nome });
+    if (nome === 'todos') av.style.background = 'var(--bg4)';
+    b.append(av, el('span', null, nome === 'todos' ? '@todos — avisa todo mundo' : nome));
+    if (u) b.append(el('span', 'muted small', 'online'));
+    b.onmousedown = (e) => { e.preventDefault(); escolherSugestao(i); };
+    sug.no.append(b);
+  });
+  // logo acima da caixa de mensagem
+  const tv = $('#textView').getBoundingClientRect(), cx = $('#composer').getBoundingClientRect();
+  sug.no.style.bottom = (tv.bottom - cx.top + 6) + 'px';
+}
+function escolherSugestao(i) {
+  const nome = sug.lista[i];
+  const fim = input.selectionStart;
+  const texto = '@' + nome + ' ';
+  input.value = input.value.slice(0, sug.ini) + texto + input.value.slice(fim);
+  const p = sug.ini + texto.length;
+  input.setSelectionRange(p, p);
+  fecharSugestoes();
+  input.dispatchEvent(new Event('input'));
+}
+// fase de captura: roda antes do Enter que envia a mensagem
+input.addEventListener('keydown', (e) => {
+  if (!sug.lista.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    sug.sel = (sug.sel + (e.key === 'ArrowDown' ? 1 : -1) + sug.lista.length) % sug.lista.length;
+    atualizarSugestoes();
+  } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    escolherSugestao(sug.sel);
+  } else if (e.key === 'Escape') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    fecharSugestoes();
+  }
+}, true);
+input.addEventListener('input', atualizarSugestoes);
+input.addEventListener('click', atualizarSugestoes);
+input.addEventListener('blur', () => setTimeout(fecharSugestoes, 100));
+
 input.addEventListener('paste', (e) => {
   const files = [...(e.clipboardData?.files || [])];
   if (files.length) { e.preventDefault(); adicionarAnexos(files); }
@@ -703,9 +842,9 @@ function setSpeaking(uid, on) {
 function playTone(kind) {
   if (S.deafened) return;
   const ac = ctx(); const o = ac.createOscillator(); const g = ac.createGain();
-  const f = { join: [520, 780], leave: [700, 420], msg: [880, 880] }[kind];
+  const f = { join: [520, 780], leave: [700, 420], msg: [880, 880], mencao: [660, 990] }[kind];
   o.frequency.setValueAtTime(f[0], ac.currentTime); o.frequency.linearRampToValueAtTime(f[1], ac.currentTime + 0.12);
-  g.gain.setValueAtTime(kind === 'msg' ? 0.04 : 0.08, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.25);
+  g.gain.setValueAtTime(kind === 'msg' ? 0.04 : kind === 'mencao' ? 0.07 : 0.08, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.25);
   o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.26);
 }
 

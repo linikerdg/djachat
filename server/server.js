@@ -22,7 +22,7 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 const CLIENT_DIR = path.join(__dirname, '..', 'client');
 const MAX_FILE = 500 * 1024 * 1024;   // 500 MB por arquivo
 const MAX_SOUND = 3 * 1024 * 1024;    // 3 MB por som do soundboard
-const HISTORY = 200;                  // mensagens enviadas ao abrir um canal
+const HISTORY = 100;                  // mensagens enviadas ao abrir um canal (e a cada página de mensagens antigas)
 const MAX_DISK = (Number(process.env.LIMITE_DISCO_GB) || 20) * 1024 ** 3;
 const MAX_WS = 1024 * 1024;           // 1 MB por mensagem do WebSocket
 const MAX_ONEDRIVE = (Number(process.env.LIMITE_ONEDRIVE_GB) || 200) * 1024 ** 3;
@@ -360,6 +360,17 @@ function acharMsg(c, canal, id) {
   const lista = db.messages[canal];
   return lista ? lista.find((x) => x.id === id) : null;
 }
+// a última mensagem de cada conversa que a pessoa vê (o app compara com o que ela já leu)
+function ultimasDe(c) {
+  const r = {};
+  const canais = db.channels.filter((x) => x.kind === 'text').map((x) => x.id).concat(c.uid ? dmsDe(c.uid).map((d) => d.id) : []);
+  for (const id of canais) {
+    const l = db.messages[id];
+    const u = l && l[l.length - 1];
+    if (u) r[id] = { ts: u.ts, uid: u.uid || null };
+  }
+  return r;
+}
 const COR = (nome) => COLORS[[...nome].reduce((a, ch) => a + ch.charCodeAt(0), 0) % COLORS.length];
 
 // ---------------------------------------------------------------- protocolo
@@ -400,7 +411,7 @@ function onMessage(c, raw) {
     }
     c.name = nome;
     c.color = COR(nome);
-    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
+    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], ultimas: ultimasDe(c), sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
     pushUsers();
     return;
   }
@@ -408,9 +419,16 @@ function onMessage(c, raw) {
 
   switch (m.t) {
     case 'history': {
+      // sem "antes": as últimas mensagens; com "antes" (id de mensagem): a página anterior a ela
       if (!podeVer(c, m.channel)) return;
       const list = db.messages[m.channel] || [];
-      send(c, { t: 'history', channel: m.channel, messages: list.slice(-HISTORY) });
+      let fim = list.length;
+      if (m.antes) {
+        fim = list.findIndex((x) => x.id === m.antes);
+        if (fim < 0) return send(c, { t: 'history', channel: m.channel, antes: m.antes, messages: [], mais: false });
+      }
+      const inicio = Math.max(0, fim - HISTORY);
+      send(c, { t: 'history', channel: m.channel, antes: m.antes || undefined, messages: list.slice(inicio, fim), mais: inicio > 0 });
       break;
     }
     case 'msg': {
