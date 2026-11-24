@@ -600,6 +600,7 @@ function renderSubchats() {
   lista.replaceChildren();
   const todos = S.subchats || [];
   $('#subchatCount').textContent = todos.length;
+  $('#secSubchats .cat').classList.toggle('novidade', todos.some((x) => S.unread.has(x.id)));
   if (!todos.length) lista.append(el('div', 'muted small vazio', 'Clique com o botão direito numa mensagem → Criar subchat.'));
   // os com coisa nova primeiro, depois os mais novos
   const ordem = [...todos].sort((a, b) => (S.unread.has(b.id) - S.unread.has(a.id)) || b.ts - a.ts);
@@ -632,25 +633,60 @@ function menuSubchat(e, sc) {
   ]);
 }
 
-// ================================================================ minimizar as listas da direita
+// ================================================================ coluna da direita: online e subchats
+// Cada lista pode ser minimizada (clique no título); com as duas minimizadas, a coluna recua e fica
+// só com os ícones. A linha entre as duas pode ser arrastada para mudar o tamanho (o app lembra).
 const recolhidas = new Set(LS.get('listasRecolhidas', []));
-function ligarRecolher(secao) {
-  const cab = secao.querySelector('.cat');
-  let seta = ic('chevron-down', 'seta');
-  cab.prepend(seta);
-  cab.classList.add('clicavel');
-  const aplicar = () => {
+const secoesDireita = [[$('#secOnline'), 'user'], [$('#secSubchats'), 'messages-square']];
+const divisor = el('div', 'divisor'); divisor.title = 'Arraste para mudar o tamanho';
+$('#secSubchats').before(divisor);
+function aplicarListas() {
+  for (const [secao] of secoesDireita) {
     const fechada = recolhidas.has(secao.id);
     secao.classList.toggle('recolhida', fechada);
-    seta.replaceWith(seta = ic(fechada ? 'chevron-right' : 'chevron-down', 'seta'));
+    const cab = secao.querySelector('.cat');
+    cab.querySelector('.seta').replaceWith(ic(fechada ? 'chevron-right' : 'chevron-down', 'seta'));
     cab.title = fechada ? 'Mostrar' : 'Minimizar';
-  };
+  }
+  const duasAbertas = !recolhidas.has('secOnline') && !recolhidas.has('secSubchats');
+  const duasFechadas = recolhidas.has('secOnline') && recolhidas.has('secSubchats');
+  $('#app').classList.toggle('direita-recolhida', duasFechadas);
+  divisor.classList.toggle('hidden', !duasAbertas);
+  $('#secSubchats').style.height = '';
+  if (duasAbertas) limitarAltura();
+}
+// a altura salva não pode passar do espaço que existe (janela menor, por exemplo)
+function limitarAltura(desejada = LS.get('alturaSubchats', 180)) {
+  const total = $('#members').clientHeight;
+  if (!total) return desejada;   // ainda na tela de entrada: ajusta quando aparecer
+  const h = Math.round(Math.min(Math.max(desejada, 60), Math.max(60, total - 110)));
+  $('#secSubchats').style.height = h + 'px';
+  return h;
+}
+new ResizeObserver(() => { if (!divisor.classList.contains('hidden')) limitarAltura(); }).observe($('#members'));
+for (const [secao, icone] of secoesDireita) {
+  const cab = secao.querySelector('.cat');
+  cab.prepend(ic('chevron-down', 'seta'), ic(icone, 'icone-secao'));
+  cab.classList.add('clicavel');
   cab.onclick = () => {
     if (recolhidas.has(secao.id)) recolhidas.delete(secao.id); else recolhidas.add(secao.id);
     LS.set('listasRecolhidas', [...recolhidas]);
-    aplicar();
+    aplicarListas();
   };
-  aplicar();
 }
-ligarRecolher($('#secOnline'));
-ligarRecolher($('#secSubchats'));
+divisor.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  divisor.setPointerCapture(e.pointerId);
+  divisor.classList.add('arrastando');
+  const y0 = e.clientY, h0 = $('#secSubchats').offsetHeight;
+  const mover = (ev) => limitarAltura(h0 - (ev.clientY - y0));
+  const soltar = () => {
+    divisor.classList.remove('arrastando');
+    divisor.removeEventListener('pointermove', mover);
+    LS.set('alturaSubchats', limitarAltura($('#secSubchats').offsetHeight));
+  };
+  divisor.addEventListener('pointermove', mover);
+  divisor.addEventListener('pointerup', soltar, { once: true });
+  divisor.addEventListener('pointercancel', soltar, { once: true });
+});
+aplicarListas();

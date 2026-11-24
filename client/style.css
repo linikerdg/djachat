@@ -393,3 +393,23 @@ body.com-barra #painel { top: 0; }
 .member.clicavel { cursor: pointer; }
 #chanTitle, #chanSub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #chanTitle { flex: 0 1 auto; } #chanSub { flex: 0 1 auto; }
+
+/* ---------- coluna da direita: divisória arrastável e coluna recolhida ---------- */
+#app { transition: grid-template-columns .18s ease; }
+#app.direita-recolhida { grid-template-columns: 250px 1fr 44px; }
+#secSubchats { border-top: 0; margin-top: 0; max-height: none; }
+.divisor { flex: none; height: 9px; margin: 2px 0; cursor: row-resize; position: relative; touch-action: none; }
+.divisor::after { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 1px; background: var(--bg4); transition: background .1s, height .1s; }
+.divisor:hover::after, .divisor.arrastando::after { background: var(--accent); height: 3px; top: 3px; }
+#secOnline.recolhida + .divisor + #secSubchats, #secOnline.recolhida + .divisor.hidden + #secSubchats { flex: 1 1 auto; }
+#secSubchats:not(.recolhida) { min-height: 60px; }
+.secao-direita .cat .icone-secao { width: 14px; height: 14px; flex: none; display: none; }
+.secao-direita .cat { position: relative; }
+.secao-direita .cat.novidade::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 4px; }
+/* recolhida: só o ícone de cada lista, um embaixo do outro */
+.direita-recolhida #members { padding: 0 4px; align-items: center; }
+.direita-recolhida .secao-direita .cat { padding: 12px 8px; justify-content: center; }
+.direita-recolhida .secao-direita .cat:hover { background: var(--bg3); }
+.direita-recolhida .secao-direita .cat > span, .direita-recolhida .secao-direita .cat .seta { display: none; }
+.direita-recolhida .secao-direita .cat .icone-secao { display: block; width: 18px; height: 18px; }
+.direita-recolhida .secao-direita .cat.novidade::after { position: absolute; top: 8px; right: 6px; margin: 0; }
