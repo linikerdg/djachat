@@ -57,6 +57,7 @@ function renderChannels() {
     }
   }
   paintSpeaking();
+  renderSubchats();
 }
 document.querySelectorAll('.cat .add').forEach((b) => {
   b.onclick = () => {
@@ -71,6 +72,7 @@ function renderMembers() {
   for (const u of S.users) {
     const r = el('div', 'member'); r.dataset.uid = u.id;
     r.oncontextmenu = (e) => menuPessoa(e, u);
+    ligarCartaoPerfil(r, () => ({ ...(S.users.find((x) => x.id === u.id) || u), online: true }));
     const av = el('div', 'avatar'); paintAvatar(av, u); pontoStatus(av, u);
     const info = el('div', 'info-membro');
     info.append(el('div', null, u.name + (u.id === S.me?.id ? ' (você)' : '')));
@@ -100,10 +102,17 @@ function pontoStatus(av, u) {
 function openText(id) {
   // linha "novas mensagens" só quando o canal tinha coisa não lida
   S.lidaAoAbrir = S.unread.has(id) ? (S.lidas[id] || 0) : null;
-  S.current = id; S.view = 'text'; S.unread.delete(id); delete S.mencoes[id]; LS.set('lastChannel', id);
+  S.current = id; S.view = 'text'; S.unread.delete(id); delete S.mencoes[id];
   const ch = canalInfo(id);
-  $('#chanTitle').replaceChildren(ic(ch && ch.kind === 'dm' ? 'at-sign' : 'hash'), ch ? ch.name : '');
-  $('#chanSub').textContent = ch && ch.kind === 'dm' ? 'mensagem direta' : '';
+  if (!ch || ch.kind !== 'subchat') LS.set('lastChannel', id);
+  $('#chanTitle').replaceChildren(ic(ch && ch.kind === 'dm' ? 'at-sign' : ch && ch.kind === 'subchat' ? 'messages-square' : 'hash'), ch ? ch.name : '');
+  const sub = $('#chanSub'); sub.replaceChildren(); sub.onclick = null; sub.classList.remove('clicavel');
+  if (ch && ch.kind === 'dm') sub.textContent = 'mensagem direta';
+  if (ch && ch.kind === 'subchat') {
+    // de onde ele veio: clicar leva até a mensagem
+    sub.textContent = 'subchat de ' + nomeDoCanal(ch.canal); sub.title = 'Ir para a mensagem de origem'; sub.classList.add('clicavel');
+    sub.onclick = () => irParaMensagem(ch.canal, ch.msgId);
+  }
   $('#textView').classList.remove('hidden'); $('#voiceView').classList.add('hidden');
   if (S.respondendo && S.respondendo.canal !== id) cancelarResposta();
   renderChannels();
@@ -222,6 +231,12 @@ function criarLinha(m, grouped) {
     body.append(t);
   }
   for (const a of m.attachments || []) if (a && a.mime) body.append(renderAttachment(a, m));
+  if (m.subchat) {
+    const sc = el('button', 'abrir-subchat'); sc.type = 'button'; sc.title = 'Abrir o subchat';
+    sc.append(ic('messages-square'), el('span', null, m.subchat.nome));
+    sc.onclick = () => openText(m.subchat.id);
+    body.append(sc);
+  }
   if (m.fixada) {
     const f = el('span', 'marca-fixada'); f.append(ic('pin'), 'fixada'); f.title = 'Fixada por ' + m.fixada.por;
     body.append(f);
@@ -578,3 +593,64 @@ async function enviarComAnexos() {
     renderAnexos();
   }
 }
+
+// ================================================================ subchats (canto inferior direito)
+function renderSubchats() {
+  const lista = $('#subchatList'); if (!lista) return;
+  lista.replaceChildren();
+  const todos = S.subchats || [];
+  $('#subchatCount').textContent = todos.length;
+  if (!todos.length) lista.append(el('div', 'muted small vazio', 'Clique com o botão direito numa mensagem → Criar subchat.'));
+  // os com coisa nova primeiro, depois os mais novos
+  const ordem = [...todos].sort((a, b) => (S.unread.has(b.id) - S.unread.has(a.id)) || b.ts - a.ts);
+  for (const sc of ordem) {
+    const row = el('div', 'chan subchat');
+    row.append(ic('messages-square'));
+    const info = el('div', 'info-subchat');
+    info.append(el('span', 'name', sc.nome), el('span', 'muted small', nomeDoCanal(sc.canal)));
+    row.append(info);
+    if (sc.id === S.current && S.view === 'text') row.classList.add('active');
+    if (S.unread.has(sc.id)) row.classList.add('unread');
+    seloMencoes(row, sc.id);
+    row.onclick = () => openText(sc.id);
+    row.oncontextmenu = (e) => menuSubchat(e, sc);
+    lista.append(row);
+  }
+}
+function criarSubchat(m) {
+  const sugestao = (m.text || (m.attachments && m.attachments[0] && m.attachments[0].name) || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  promptModal('Novo subchat', 'Nome do subchat (a conversa fica separada, ligada a esta mensagem)', sugestao, (nome) => send({ t: 'subchat_criar', channel: m.channel, id: m.id, nome }));
+}
+function menuSubchat(e, sc) {
+  abrirMenu(e, [
+    { titulo: sc.nome },
+    { rotulo: 'Ir para a mensagem de origem', icone: 'reply', acao: () => irParaMensagem(sc.canal, sc.msgId) },
+    { rotulo: 'Renomear', icone: 'pencil', acao: () => promptModal('Renomear subchat', 'Nome do subchat', sc.nome, (nome) => send({ t: 'subchat_renomear', id: sc.id, nome })) },
+    S.unread.has(sc.id) ? { rotulo: 'Marcar como lido', icone: 'check-check', acao: () => { S.unread.delete(sc.id); delete S.mencoes[sc.id]; renderSubchats(); } } : null,
+    '-',
+    { rotulo: 'Apagar subchat', icone: 'trash-2', perigo: true, acao: () => confirmModal(`Apagar o subchat "${sc.nome}"?`, 'As mensagens dele serão perdidas para todo mundo.', () => send({ t: 'subchat_apagar', id: sc.id })) },
+  ]);
+}
+
+// ================================================================ minimizar as listas da direita
+const recolhidas = new Set(LS.get('listasRecolhidas', []));
+function ligarRecolher(secao) {
+  const cab = secao.querySelector('.cat');
+  let seta = ic('chevron-down', 'seta');
+  cab.prepend(seta);
+  cab.classList.add('clicavel');
+  const aplicar = () => {
+    const fechada = recolhidas.has(secao.id);
+    secao.classList.toggle('recolhida', fechada);
+    seta.replaceWith(seta = ic(fechada ? 'chevron-right' : 'chevron-down', 'seta'));
+    cab.title = fechada ? 'Mostrar' : 'Minimizar';
+  };
+  cab.onclick = () => {
+    if (recolhidas.has(secao.id)) recolhidas.delete(secao.id); else recolhidas.add(secao.id);
+    LS.set('listasRecolhidas', [...recolhidas]);
+    aplicar();
+  };
+  aplicar();
+}
+ligarRecolher($('#secOnline'));
+ligarRecolher($('#secSubchats'));

@@ -90,7 +90,9 @@ function chaveConta() {
 }
 const souEu = (msg) => (msg.uid && S.me.uid ? msg.uid === S.me.uid : msg.authorId === S.me.id);
 const idDm = (uidOutro) => 'dm:' + [S.me.uid, uidOutro].sort().join(':');
-const canalInfo = (id) => S.channels.find((c) => c.id === id) || S.dms.find((d) => d.id === id);
+const canalInfo = (id) => S.channels.find((c) => c.id === id) || S.dms.find((d) => d.id === id) || subchatInfo(id);
+// um subchat parece um canal para o resto do app (kind 'subchat', name)
+function subchatInfo(id) { const sc = (S.subchats || []).find((x) => x.id === id); return sc ? { ...sc, kind: 'subchat', name: sc.nome } : null; }
 // chave estável de cada pessoa para guardar volume e mudo (conta; app antigo cai no nome)
 const chavePessoa = (u) => (u.uid ? u.uid : 'nome:' + u.name);
 
@@ -133,7 +135,7 @@ function handle(m) {
       S.pass = ''; LS.set('session', m.session);
       soundCache.clear();   // os endereços dos sons levam o servidor e o token: trocando de servidor, mudam
       if (m.ice) S.ice = m.ice;
-      S.channels = m.channels; S.sounds = m.sounds; S.users = m.users; S.dms = m.dms || []; S.hospedavel = !!m.hospedavel;
+      S.channels = m.channels; S.sounds = m.sounds; S.users = m.users; S.dms = m.dms || []; S.hospedavel = !!m.hospedavel; S.subchats = m.subchats || [];
       $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
       $('#connDot').className = 'dot ok'; $('#connDot').title = 'Conectado';
       $('#meName').textContent = S.me.name; paintAvatar($('#meAvatar'), S.me);
@@ -216,6 +218,17 @@ function handle(m) {
       paintAvatar($('#meAvatar'), S.me); mostrarMeuStatus();
       if (S.view === 'text') renderMessages(true);
       break;
+    case 'subchats':
+      S.subchats = m.subchats;
+      // o subchat aberto foi apagado: volta para a conversa de onde ele veio
+      if (S.current && S.current.startsWith('sc:') && !canalInfo(S.current)) {
+        const volta = canalInfo(LS.get('lastChannel')) && !String(LS.get('lastChannel')).startsWith('sc:') ? LS.get('lastChannel') : (S.channels.find((c) => c.kind === 'text') || {}).id;
+        if (volta) openText(volta);
+      }
+      renderSubchats();
+      if (S.current && S.current.startsWith('sc:') && canalInfo(S.current)) $('#chanTitle').replaceChildren(ic('messages-square'), canalInfo(S.current).name);   // nome novo no topo
+      break;
+    case 'subchat_criado': openText(m.id); break;
     case 'resultados': mostrarResultados(m); break;
     case 'fixadas': if (m.channel === S.current) mostrarFixadas(m.messages); break;
     case 'cercanias': {

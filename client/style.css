@@ -368,3 +368,28 @@ body.com-barra #painel { top: 0; }
 .cartao-perfil .acoes { display: flex; gap: 6px; margin-top: 4px; }
 .cartao-perfil .acoes button { flex: 1; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; padding: 6px 8px; }
 .cartao-perfil .acoes .ic { width: 15px; height: 15px; }
+
+/* ---------- lista da direita: online e subchats, cada uma pode ser minimizada ---------- */
+#members { display: flex; flex-direction: column; overflow: hidden; padding: 0 8px 8px; }
+.secao-direita { display: flex; flex-direction: column; min-height: 0; }
+#secOnline { flex: 1 1 auto; }
+#secSubchats { flex: 0 1 auto; max-height: 45%; border-top: 1px solid var(--line); margin-top: 6px; }
+#secOnline.recolhida { flex: 0 0 auto; }
+#secOnline.recolhida + #secSubchats { max-height: none; flex: 1 1 auto; }
+.secao-direita.recolhida .corpo-secao { display: none; }
+.corpo-secao { overflow-y: auto; min-height: 0; }
+.secao-direita .cat { justify-content: flex-start; gap: 4px; border-radius: 6px; }
+.secao-direita .cat:hover { color: var(--text); }
+.secao-direita .cat .seta { width: 14px; height: 14px; flex: none; }
+.chan.subchat { align-items: center; gap: 8px; }
+.chan.subchat > .ic { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.info-subchat { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.info-subchat .name, .info-subchat .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#subchatList .vazio { padding: 6px; }
+.abrir-subchat { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 4px 10px; font-size: 13px; background: var(--bg2); border: 1px solid var(--bg4); border-radius: 6px; color: var(--link); cursor: pointer; }
+.abrir-subchat:hover { background: var(--bg3); }
+.abrir-subchat .ic { width: 15px; height: 15px; }
+#chanSub.clicavel:hover { text-decoration: underline; }
+.member.clicavel { cursor: pointer; }
+#chanTitle, #chanSub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#chanTitle { flex: 0 1 auto; } #chanSub { flex: 0 1 auto; }

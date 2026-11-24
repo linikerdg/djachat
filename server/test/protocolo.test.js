@@ -240,3 +240,51 @@ test('foto de perfil e status', async () => {
   await b.esperar('users', (x) => x.users.some((y) => y.uid === a.me.uid && !y.foto && !y.status));
   a.fechar(); b.fechar();
 });
+
+test('subchat a partir de uma mensagem: criar, conversar, renomear e apagar', async () => {
+  const a = await entrar(srv, 'Wil');
+  const b = await entrar(srv, 'Xu');
+  a.mandar({ t: 'msg', channel: 'geral', text: 'vamos planejar a base nova' });
+  const { message } = await a.esperar('msg', (x) => x.message.text === 'vamos planejar a base nova');
+  a.mandar({ t: 'subchat_criar', channel: 'geral', id: message.id, nome: 'Base nova' });
+  const { id } = await a.esperar('subchat_criado');
+  assert.match(id, /^sc:/);
+  const lista = await b.esperar('subchats', (x) => x.subchats.some((s) => s.id === id));
+  assert.equal(lista.subchats.find((s) => s.id === id).nome, 'Base nova');
+  const up = await b.esperar('msg_update', (x) => x.message.id === message.id && x.message.subchat);
+  assert.equal(up.message.subchat.id, id);
+  // conversa dentro do subchat
+  b.mandar({ t: 'msg', channel: id, text: 'eu levo a madeira' });
+  const dentro = await a.esperar('msg', (x) => x.message.channel === id);
+  assert.equal(dentro.message.text, 'eu levo a madeira');
+  a.mandar({ t: 'history', channel: id });
+  const h = await a.esperar('history', (x) => x.channel === id);
+  assert.equal(h.messages.length, 1);
+  // não dá subchat dentro de subchat
+  a.mandar({ t: 'subchat_criar', channel: id, id: dentro.message.id });
+  assert.ok(await a.naoRecebe('subchat_criado'));
+  // renomear e apagar
+  a.mandar({ t: 'subchat_renomear', id, nome: 'Base do pântano' });
+  await b.esperar('subchats', (x) => x.subchats.some((s) => s.id === id && s.nome === 'Base do pântano'));
+  b.mandar({ t: 'subchat_apagar', id });
+  await a.esperar('subchats', (x) => !x.subchats.some((s) => s.id === id));
+  await a.esperar('msg_update', (x) => x.message.id === message.id && !x.message.subchat);
+  a.fechar(); b.fechar();
+});
+
+test('subchat de uma DM só aparece para os dois', async () => {
+  const a = await entrar(srv, 'Yara');
+  const b = await entrar(srv, 'Zeca');
+  const c = await entrar(srv, 'Abel');
+  const dm = 'dm:' + [a.me.uid, b.me.uid].sort().join(':');
+  a.mandar({ t: 'msg', channel: dm, text: 'segredo' });
+  const { message } = await a.esperar('msg', (x) => x.message.text === 'segredo');
+  a.mandar({ t: 'subchat_criar', channel: dm, id: message.id, nome: 'só nós' });
+  const { id } = await a.esperar('subchat_criado');
+  await b.esperar('subchats', (x) => x.subchats.some((s) => s.id === id));
+  const doC = await c.esperar('subchats');
+  assert.ok(!doC.subchats.some((s) => s.id === id));
+  c.mandar({ t: 'msg', channel: id, text: 'intruso' });
+  assert.ok(await b.naoRecebe('msg', (x) => x.message.text === 'intruso'));
+  a.fechar(); b.fechar(); c.fechar();
+});

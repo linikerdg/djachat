@@ -102,7 +102,8 @@ function abrirCartao(ancora, u, fixo) {
   // ao lado do nome/foto, sem sair da tela
   const r = ancora.getBoundingClientRect();
   const w = c.offsetWidth, h = c.offsetHeight;
-  c.style.left = Math.max(6, Math.min(r.right + 8, innerWidth - w - 6)) + 'px';
+  const x = r.right + 8 + w <= innerWidth - 6 ? r.right + 8 : r.left - w - 8;
+  c.style.left = Math.max(6, Math.min(x, innerWidth - w - 6)) + 'px';
   c.style.top = Math.max(6, Math.min(r.top, innerHeight - h - 6)) + 'px';
   cartaoAberto = c; cartaoFixo = !!fixo; cartaoAncora = ancora;
 }

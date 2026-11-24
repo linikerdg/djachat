@@ -121,6 +121,9 @@ function menuPessoa(e, u) {
 function menuProprio(e) {
   abrirMenu(e, [
     { titulo: S.me.name + ' (você)' },
+    S.me.uid ? { rotulo: S.me.foto ? 'Trocar foto' : 'Colocar foto', icone: 'image-plus', acao: escolherFoto } : null,
+    S.me.uid && S.me.foto ? { rotulo: 'Tirar foto', icone: 'x', acao: () => send({ t: 'perfil', foto: null }) } : null,
+    '-',
     { rotulo: S.muted ? 'Desmutar microfone' : 'Mutar microfone', icone: S.muted ? 'mic' : 'mic-off', acao: () => $('#btnMute').click() },
     { rotulo: S.deafened ? 'Voltar a ouvir' : 'Ensurdecer', icone: S.deafened ? 'headphones' : 'headphone-off', acao: () => $('#btnDeafen').click() },
     S.voice ? { rotulo: 'Sair da sala de voz', icone: 'phone-off', perigo: true, acao: () => send({ t: 'voice_leave' }) } : null,
@@ -163,6 +166,8 @@ function itensMensagem(m) {
     sel ? { rotulo: 'Copiar seleção', icone: 'copy', acao: () => copiarTexto(sel) } : null,
     m.text ? { rotulo: 'Copiar texto', icone: 'copy', acao: () => copiarTexto(m.text) } : null,
     { rotulo: 'Mencionar ' + m.author, icone: 'at-sign', acao: () => mencionar(m.author) },
+    m.subchat ? { rotulo: 'Abrir subchat', icone: 'messages-square', acao: () => openText(m.subchat.id) }
+      : !String(m.channel).startsWith('sc:') ? { rotulo: 'Criar subchat', icone: 'messages-square', acao: () => criarSubchat(m) } : null,
     { rotulo: m.fixada ? 'Desafixar' : 'Fixar mensagem', icone: m.fixada ? 'pin-off' : 'pin', acao: () => send({ t: 'fixar', channel: m.channel, id: m.id, fixar: !m.fixada }) },
     minha ? '-' : null,
     minha ? { rotulo: 'Editar', icone: 'pencil', acao: () => editarMensagem(m) } : null,
