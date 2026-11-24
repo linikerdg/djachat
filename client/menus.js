@@ -135,6 +135,12 @@ function menuProprio(e) {
   ]);
 }
 $('#userPanel').oncontextmenu = menuProprio;
+// foto e nome no canto: o clique normal também abre as opções
+for (const alvo of [$('#meAvatar'), $('#userPanel .me-name')]) {
+  alvo.classList.add('clicavel');
+  alvo.title = 'Status e opções';
+  alvo.onclick = menuProprio;
+}
 
 function itensMensagem(m) {
   const sel = String(window.getSelection() || '').trim();

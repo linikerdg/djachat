@@ -350,3 +350,21 @@ body.com-barra #painel { top: 0; }
 #avisoAtualizacao { position: fixed; left: 50%; top: 44px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 10px; background: var(--bg0); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px 8px 14px; box-shadow: 0 8px 24px #000a; font-size: 14px; }
 #avisoAtualizacao button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 10px; }
 #avisoAtualizacao .ic { width: 15px; height: 15px; }
+
+/* ---------- nome e foto clicáveis, cartão de perfil ---------- */
+.clicavel { cursor: pointer; user-select: none; }
+.msg .meta b.clicavel:hover { text-decoration: underline; }
+.msg .avatar.clicavel:hover, #meAvatar.clicavel:hover { outline-color: var(--bg4); }
+#userPanel .me-name.clicavel { border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+#userPanel .me-name.clicavel:hover { background: var(--bg2); }
+.cartao-perfil { position: fixed; z-index: 48; width: 280px; background: var(--bg0); border: 1px solid var(--bg4); border-radius: 10px; box-shadow: 0 10px 30px #000b; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.cartao-perfil .topo { display: flex; align-items: center; gap: 12px; }
+.cartao-perfil .topo .avatar { width: 56px; height: 56px; font-size: 22px; }
+.cartao-perfil .topo b { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cartao-perfil .ponto-status { border-color: var(--bg0); }
+.cartao-perfil .recado { background: var(--bg2); border-radius: 6px; padding: 6px 8px; font-size: 14px; overflow-wrap: anywhere; }
+.cartao-perfil .na-voz { display: flex; align-items: center; gap: 6px; color: var(--green); }
+.cartao-perfil .na-voz .ic { width: 15px; height: 15px; }
+.cartao-perfil .acoes { display: flex; gap: 6px; margin-top: 4px; }
+.cartao-perfil .acoes button { flex: 1; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; padding: 6px 8px; }
+.cartao-perfil .acoes .ic { width: 15px; height: 15px; }

@@ -200,6 +200,8 @@ function criarLinha(m, grouped) {
     const av = el('div', 'avatar'); paintAvatar(av, { name: m.author, uid: m.uid, color: m.color }); left.append(av);
     const meta = el('div', 'meta');
     const b = el('b', null, m.author); b.style.color = m.color;
+    // nome e foto: clique abre o perfil, e parar o mouse em cima mostra uma prévia
+    for (const alvo of [av, b]) ligarCartaoPerfil(alvo, () => pessoaDaMensagem(m));
     meta.append(b, el('span', 'time', d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })));
     body.append(meta);
   } else {
