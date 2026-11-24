@@ -77,12 +77,42 @@ npm run build
 
 O arquivo `desktop/dist/DJAchat-Instalador.exe` instala o app sem pedir administrador e sem precisar do Node.
 
+### Atualização automática do app
+
+A partir da versão **1.1.0**, o app instalado procura versão nova nos [Releases do GitHub](https://github.com/linikerdg/djachat/releases) ao abrir e a cada 6 horas. Ele baixa sozinho e mostra um aviso **"Reiniciar e atualizar"**. Se você escolher "Depois", ele instala quando você fechar o app.
+
+- Quem ainda está numa versão antiga (1.0.x) precisa instalar a 1.1.0 **uma vez** na mão. Depois disso, as próximas chegam sozinhas.
+- Rodando pelo `npm start` (sem instalar), o app não procura atualização.
+- O servidor não se atualiza sozinho: o host roda `git pull` e reinicia o servidor.
+
+**Publicar uma versão nova (quem mantém o repositório):**
+
+1. Aumente o número em `"version"` no `desktop/package.json` (ex.: `1.1.0` → `1.1.1`).
+2. Crie um token no GitHub (Settings → Developer settings → Personal access tokens) com permissão **repo**.
+3. Rode:
+
+```powershell
+cd desktop
+npm install
+$env:GH_TOKEN = "seu-token-aqui"
+npm run publicar
+```
+
+Isso gera o instalador e cria o Release no GitHub com ele. Os apps dos amigos acham a versão nova sozinhos.
+
 ---
 
 ## Como usar
 
 | Recurso | Onde |
 |---|---|
+| Buscar mensagens | caixa **Buscar** no topo, ou **Ctrl+F**; clique num resultado para ir até ele |
+| Mensagens fixadas | 📌 no topo do canal; para fixar, clique direito na mensagem → Fixar |
+| Emojis | botão 😀 na caixa de mensagem; nas reações, clique direito → `＋` |
+| Mencionar alguém | digite `@` e escolha o nome (`@todos` chama todo mundo); menções aparecem em destaque e com um selo no canal |
+| Formatação | `**negrito**`, `*itálico*`, `~~riscado~~`, `\|\|spoiler\|\|`, `` `código` ``, ` ``` ` para bloco e `>` para citação |
+| Foto de perfil e status | ⚙️ Configurações → Perfil, ou clique no seu nome embaixo à esquerda (online, ausente, ocupado e um recado) |
+| Mensagens antigas | role para cima e elas carregam; uma linha "novas mensagens" marca onde você parou |
 | Criar/apagar canal | `＋` ao lado de "Canais de texto/voz"; `✕` ao passar o mouse no canal |
 | Enviar arquivo | botão `＋` na caixa de mensagem, **arrastar e soltar**, ou **Ctrl+V** de imagem (até 500 MB) |
 | Entrar na voz | clique no canal de voz; clique de novo para ver a sala |

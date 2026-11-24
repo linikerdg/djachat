@@ -163,9 +163,31 @@ if (desktop && desktop.janela) {
     else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'i') { e.preventDefault(); janela('devtools'); }
   });
 }
+// ---------------------------------------------------------------- atualização automática
+// O app desktop baixa a versão nova sozinho; aqui só aparece o aviso para reiniciar.
+function avisoAtualizacao(versao) {
+  if (!versao || document.querySelector('#avisoAtualizacao')) return;
+  const a = el('div'); a.id = 'avisoAtualizacao';
+  const txt = el('span'); txt.append('Versão ', el('b', null, versao), ' do DJAchat baixada.');
+  const agora = el('button', 'primary'); agora.type = 'button'; rotular(agora, 'refresh-cw', 'Reiniciar e atualizar');
+  agora.onclick = () => {
+    const ir = () => desktop.instalarAtualizacao();
+    if (S.voice) confirmModal('Reiniciar agora?', 'Você sai da sala de voz por alguns segundos enquanto o app atualiza.', ir); else ir();
+  };
+  const depois = el('button'); depois.type = 'button'; depois.textContent = 'Depois';
+  depois.title = 'Atualiza sozinho quando você fechar o DJAchat';
+  depois.onclick = () => a.remove();
+  a.append(txt, agora, depois);
+  document.body.append(a);
+}
+if (desktop && desktop.aoAtualizar) {
+  desktop.aoAtualizar((info) => avisoAtualizacao(info.versao));
+  desktop.versao().then((v) => { S.versaoApp = v.atual; avisoAtualizacao(v.pronta); }).catch(() => {});
+}
+
 function opcoesDaJanela() {
   const w = el('div', 'janela-opcoes');
-  w.append(el('label', null, 'Janela e app'));
+  w.append(el('label', null, 'Janela e app' + (S.versaoApp ? ' · versão ' + S.versaoApp : '')));
   const botao = (icone, texto, acao, classe) => { const b = el('button', classe || null); b.type = 'button'; rotular(b, icone, texto); b.onclick = acao; return b; };
   const zoom = el('div', 'row');
   const atual = el('span', 'zoom', Math.round(S.zoom * 100) + '%');

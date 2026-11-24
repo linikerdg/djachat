@@ -345,3 +345,8 @@ body.com-barra #painel { top: 0; }
 .perfil .row button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; } .perfil .row .ic { width: 15px; height: 15px; }
 .avatar.grande { width: 72px; height: 72px; font-size: 30px; }
 .me-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- aviso de versão nova ---------- */
+#avisoAtualizacao { position: fixed; left: 50%; top: 44px; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 10px; background: var(--bg0); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px 8px 14px; box-shadow: 0 8px 24px #000a; font-size: 14px; }
+#avisoAtualizacao button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 10px; }
+#avisoAtualizacao .ic { width: 15px; height: 15px; }
