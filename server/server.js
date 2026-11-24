@@ -551,11 +551,13 @@ function onMessage(c, raw) {
         const st = m.status || {};
         const tipo = STATUS.includes(st.tipo) ? st.tipo : 'online';
         const texto = str(st.texto).trim().slice(0, 60);
-        if (tipo === 'online' && !texto) delete conta.status; else conta.status = { tipo, texto };
+        // auto = ausente por estar parado: o app volta para online sozinho (inclusive depois de reiniciar)
+        if (tipo === 'online' && !texto) delete conta.status; else conta.status = { tipo, texto, ...(tipo === 'ausente' && st.auto ? { auto: true } : {}) };
       }
       save();
       pushUsers();
-      broadcast({ t: 'fotos', fotos: fotos() });
+      // a lista de fotos (que redesenha as mensagens) só vai quando a foto mudou, não a cada status
+      if ('foto' in m) broadcast({ t: 'fotos', fotos: fotos() });
       break;
     }
     case 'typing':

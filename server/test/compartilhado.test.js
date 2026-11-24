@@ -59,12 +59,16 @@ test('converte o formato antigo e envia só os canais que mudaram', async () => 
   db.messages.memes.push({ id: 'm4', text: 'mais um' });
   od.gravacoes.length = 0;
   await c.salvarBanco(db, 9);
-  assert.deepEqual(od.gravacoes, ['estado/v2/mensagens/memes.json', 'estado/v2/db.json']);
+  assert.equal(od.gravacoes.length, 2);
+  assert.match(od.gravacoes[0], /^estado\/v2\/mensagens\/memes\.[0-9a-f]{16}\.json$/);
+  assert.equal(od.gravacoes[1], 'estado/v2/db.json');
+  // e o arquivo velho de "memes" saiu: só um por canal
+  assert.equal([...od.arquivos.keys()].filter((p) => p.includes('/memes.')).length, 1);
 
   // canal apagado: o arquivo dele sai depois do db.json
   delete db.messages.geral;
   await c.salvarBanco(db, 10);
-  assert.ok(!od.arquivos.has('estado/v2/mensagens/geral.json'));
+  assert.ok(![...od.arquivos.keys()].some((p) => p.includes('/geral.')));
   await c.liberar();
 
   // outro PC lê tudo de volta igual
@@ -120,7 +124,39 @@ test('o db.json não é gravado por cima de uma versão que outro servidor mudou
   const db = { ...dbAntigo() };
   await c.salvarBanco(db, 1);
   // alguém mexeu no db.json por fora
-  await od.gravarJson('estado/v2/db.json', '{"versao":99,"canais":[]}');
+  await od.gravarJson('estado/v2/db.json', '{"versao":99,"canais":{}}');
   await assert.rejects(c.salvarBanco(db, 2), (e) => e.codigo === 'conflito');
   await c.liberar();
+});
+
+test('um servidor que perdeu a vez não estraga as mensagens que o outro gravou', async () => {
+  const od = oneDriveFalso();
+  const a = criarCompartilhado({ oneDrive: od, aoPerder() {} });
+  await a.travar();
+  await a.lerBanco();
+  const dbA = dbAntigo();
+  await a.salvarBanco(dbA, 1);
+  // B leu a mesma versão (a trava venceu e os dois acham que são donos)
+  const b = criarCompartilhado({ oneDrive: od, aoPerder() {} });
+  const lidoB = await b.lerBanco();
+  // A grava uma mensagem nova; depois B tenta gravar a cópia velha dele, com outra mudança
+  dbA.messages.geral.push({ id: 'a1', text: 'de A' });
+  await a.salvarBanco(dbA, 2);
+  lidoB.dados.messages.geral.push({ id: 'b1', text: 'de B' });
+  await assert.rejects(b.salvarBanco(lidoB.dados, 2), (e) => e.codigo === 'conflito');
+  // quem lê depois vê exatamente o que A confirmou
+  const c = criarCompartilhado({ oneDrive: od, aoPerder() {} });
+  const lido = await c.lerBanco();
+  assert.deepEqual(lido.dados.messages.geral.map((m) => m.id), ['m1', 'a1']);
+  await a.liberar();
+});
+
+test('canal sem o arquivo de mensagens: para em vez de apagar o histórico', async () => {
+  const od = oneDriveFalso();
+  const a = criarCompartilhado({ oneDrive: od, aoPerder() {} });
+  await a.lerBanco();
+  await a.salvarBanco(dbAntigo(), 1);
+  for (const p of [...od.arquivos.keys()]) if (p.includes('/geral.')) od.arquivos.delete(p);
+  const b = criarCompartilhado({ oneDrive: od, aoPerder() {} });
+  await assert.rejects(b.lerBanco(), /faltam as mensagens do canal "geral"/);
 });

@@ -230,6 +230,12 @@ test('foto de perfil e status', async () => {
   assert.ok(f);
   // a foto não é apagada como "arquivo sem mensagem"
   assert.equal((await fetch(`${srv.base}/files/${img.id}?t=${a.welcome.token}`)).status, 200);
+  // ausente automático fica marcado (o app volta sozinho); o escolhido à mão, não
+  a.mandar({ t: 'perfil', status: { tipo: 'ausente', texto: '', auto: true } });
+  await b.esperar('users', (x) => x.users.some((y) => y.uid === a.me.uid && y.status && y.status.auto === true));
+  a.mandar({ t: 'perfil', status: { tipo: 'ocupado', texto: '', auto: true } });
+  const u2 = await b.esperar('users', (x) => x.users.some((y) => y.uid === a.me.uid && y.status && y.status.tipo === 'ocupado'));
+  assert.equal(u2.users.find((y) => y.uid === a.me.uid).status.auto, undefined);
   a.mandar({ t: 'perfil', foto: null, status: { tipo: 'online' } });
   await b.esperar('users', (x) => x.users.some((y) => y.uid === a.me.uid && !y.foto && !y.status));
   a.fechar(); b.fechar();

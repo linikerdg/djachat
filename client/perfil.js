@@ -7,7 +7,6 @@ const meuTipo = () => (S.me && S.me.status && S.me.status.tipo) || 'online';
 const ocupado = () => meuTipo() === 'ocupado';
 function definirStatus(tipo, texto) {
   if (!S.me.uid) return toast('Atualize o DJAchat para usar status.');
-  S.ausenteAutomatico = false;
   send({ t: 'perfil', status: { tipo, texto: texto === undefined ? ((S.me.status && S.me.status.texto) || '') : texto } });
 }
 function mostrarMeuStatus() {
@@ -15,17 +14,23 @@ function mostrarMeuStatus() {
   $('#userPanel .me-name span').textContent = st && st.texto ? st.texto : { online: 'online', ausente: 'ausente', ocupado: 'ocupado' }[meuTipo()];
   const av = $('#meAvatar'); av.querySelectorAll('.ponto-status').forEach((p) => p.remove()); pontoStatus(av, S.me);
 }
-// sem mexer no mouse e no teclado por 10 minutos: ausente (volta sozinho)
-let ultimoMovimento = Date.now();
+// sem mexer no mouse e no teclado por 10 minutos: ausente (volta sozinho).
+// O servidor guarda que foi automático (status.auto), então volta mesmo depois de reiniciar o app
+// ou se a pessoa voltou por outro PC. Cada PC manda o "ausente" uma vez só por período parado.
+let ultimoMovimento = Date.now(), avisouParado = false;
+const ausenteAuto = () => !!(S.me && S.me.status && S.me.status.tipo === 'ausente' && S.me.status.auto);
 for (const ev of ['mousemove', 'keydown', 'mousedown', 'wheel']) {
   window.addEventListener(ev, () => {
-    ultimoMovimento = Date.now();
-    if (S.ausenteAutomatico && S.connected) { S.ausenteAutomatico = false; send({ t: 'perfil', status: { tipo: 'online', texto: (S.me.status && S.me.status.texto) || '' } }); }
+    ultimoMovimento = Date.now(); avisouParado = false;
+    if (S.connected && S.me && S.me.uid && ausenteAuto()) {
+      S.me.status = { ...S.me.status, auto: false };   // não manda de novo até o servidor responder
+      send({ t: 'perfil', status: { tipo: 'online', texto: S.me.status.texto || '' } });
+    }
   }, { passive: true });
 }
 setInterval(() => {
-  if (!S.connected || !S.me || !S.me.uid || meuTipo() !== 'online' || S.voice) return;
-  if (Date.now() - ultimoMovimento > 10 * 60000) { S.ausenteAutomatico = true; send({ t: 'perfil', status: { tipo: 'ausente', texto: (S.me.status && S.me.status.texto) || '' } }); }
+  if (!S.connected || !S.me || !S.me.uid || meuTipo() !== 'online' || S.voice || avisouParado) return;
+  if (Date.now() - ultimoMovimento > 10 * 60000) { avisouParado = true; send({ t: 'perfil', status: { tipo: 'ausente', texto: (S.me.status && S.me.status.texto) || '', auto: true } }); }
 }, 30000);
 
 // a foto vira um quadrado de 256 px antes de subir (fica leve para todo mundo)
