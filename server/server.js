@@ -310,6 +310,7 @@ const anexos = (msgs) => msgs.flatMap((m) => (m.attachments || []).map((a) => a.
 // apaga do disco os arquivos da lista que nenhuma mensagem ou som usa mais
 function purgeFiles(ids) {
   const emUso = new Set(db.sounds.map((s) => s.fileId));
+  for (const p of Object.values(db.contas)) if (p.foto) emUso.add(p.foto);
   for (const list of Object.values(db.messages)) for (const id of anexos(list)) emUso.add(id);
   let mudou = false;
   for (const id of ids) {
@@ -334,7 +335,11 @@ const clients = new Map();  // id -> { id, ip, name, color, sock, voice, muted, 
 const tentativas = new Map();  // ip -> { n, ate, em } (senhas erradas)
 
 // id = conexão (voz e sinalização); uid = conta (estável entre conexões e PCs)
-const publicUser = (c) => ({ id: c.id, uid: c.uid, name: c.name, color: c.color, voice: c.voice, muted: c.muted, deafened: c.deafened, sharing: c.sharing });
+const perfilDe = (uidConta) => { const p = uidConta && db.contas[uidConta]; return p ? { foto: p.foto || null, status: p.status || null } : { foto: null, status: null }; };
+const publicUser = (c) => ({ id: c.id, uid: c.uid, name: c.name, color: c.color, voice: c.voice, muted: c.muted, deafened: c.deafened, sharing: c.sharing, ...perfilDe(c.uid) });
+// fotos de todas as contas (para quem escreveu e não está online)
+const fotos = () => Object.fromEntries(Object.entries(db.contas).filter(([, p]) => p.foto).map(([u, p]) => [u, p.foto]));
+const STATUS = ['online', 'ausente', 'ocupado'];
 const users = () => [...clients.values()].filter((c) => c.name).map(publicUser);
 
 function send(c, obj) { if (c && c.sock) wsSend(c.sock, JSON.stringify(obj)); }
@@ -371,6 +376,7 @@ function ultimasDe(c) {
   }
   return r;
 }
+const normalizar = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const COR = (nome) => COLORS[[...nome].reduce((a, ch) => a + ch.charCodeAt(0), 0) % COLORS.length];
 
 // ---------------------------------------------------------------- protocolo
@@ -411,7 +417,7 @@ function onMessage(c, raw) {
     }
     c.name = nome;
     c.color = COR(nome);
-    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], ultimas: ultimasDe(c), sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
+    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], ultimas: ultimasDe(c), fotos: fotos(), sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
     pushUsers();
     return;
   }
@@ -488,6 +494,68 @@ function onMessage(c, raw) {
       if (!(reacoes[emoji] || []).length) delete reacoes[emoji];
       save();
       broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
+      break;
+    }
+    case 'buscar': {
+      // procura nas conversas que a pessoa vê, sem diferença de acento nem de maiúsculas; as mais novas primeiro
+      const termo = normalizar(str(m.texto).trim()).slice(0, 100);
+      if (termo.length < 2) return send(c, { t: 'resultados', texto: m.texto, itens: [] });
+      const canais = db.channels.filter((x) => x.kind === 'text').map((x) => x.id).concat(c.uid ? dmsDe(c.uid).map((d) => d.id) : []);
+      const itens = [];
+      for (const canal of canais) {
+        for (const [pos, msg] of (db.messages[canal] || []).entries()) {
+          const onde = normalizar(`${msg.text || ''} ${(msg.attachments || []).map((a) => a.name).join(' ')} ${msg.author}`);
+          if (onde.includes(termo)) itens.push({ channel: canal, message: msg, pos });
+        }
+      }
+      itens.sort((a, b) => b.message.ts - a.message.ts || b.pos - a.pos);   // mesma hora: a que veio depois primeiro
+      send(c, { t: 'resultados', texto: m.texto, itens: itens.slice(0, 50).map(({ channel, message }) => ({ channel, message })), total: itens.length });
+      break;
+    }
+    case 'cercanias': {
+      // as mensagens em volta de uma (para abrir um resultado de busca ou uma fixada antiga)
+      if (!podeVer(c, m.channel)) return;
+      const list = db.messages[m.channel] || [];
+      const i = list.findIndex((x) => x.id === m.id);
+      if (i < 0) return send(c, { t: 'error', message: 'Essa mensagem não existe mais.' });
+      const inicio = Math.max(0, i - 50);
+      send(c, { t: 'cercanias', channel: m.channel, id: m.id, messages: list.slice(inicio, i + 50), mais: inicio > 0, depois: i + 50 < list.length });
+      break;
+    }
+    case 'fixar': {
+      const msg = acharMsg(c, m.channel, m.id);
+      if (!msg) return;
+      if (m.fixar) msg.fixada = { por: c.name, ts: Date.now() }; else delete msg.fixada;
+      save();
+      broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
+      break;
+    }
+    case 'fixadas': {
+      if (!podeVer(c, m.channel)) return;
+      const lista = (db.messages[m.channel] || []).filter((x) => x.fixada).sort((a, b) => b.fixada.ts - a.fixada.ts);
+      send(c, { t: 'fixadas', channel: m.channel, messages: lista });
+      break;
+    }
+    case 'perfil': {
+      // foto (id de um arquivo de imagem já enviado, ou null para tirar) e status
+      if (!c.uid || !db.contas[c.uid]) return;
+      const conta = db.contas[c.uid];
+      if ('foto' in m) {
+        const f = m.foto && db.files[m.foto];
+        if (m.foto && (!f || !/^image\/(png|jpe?g|gif|webp)$/i.test(f.mime))) return send(c, { t: 'error', message: 'A foto precisa ser uma imagem (png, jpg, gif ou webp).' });
+        const antiga = conta.foto;
+        if (m.foto) conta.foto = m.foto; else delete conta.foto;
+        if (antiga && antiga !== conta.foto) purgeFiles([antiga]);
+      }
+      if ('status' in m) {
+        const st = m.status || {};
+        const tipo = STATUS.includes(st.tipo) ? st.tipo : 'online';
+        const texto = str(st.texto).trim().slice(0, 60);
+        if (tipo === 'online' && !texto) delete conta.status; else conta.status = { tipo, texto };
+      }
+      save();
+      pushUsers();
+      broadcast({ t: 'fotos', fotos: fotos() });
       break;
     }
     case 'typing':

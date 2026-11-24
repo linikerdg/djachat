@@ -295,3 +295,53 @@ body.com-barra .modal-card { max-height: calc(100vh - 32px - 6vh); }
 #sugestoes .opcao { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; background: none; border-radius: 5px; text-align: left; }
 #sugestoes .opcao .avatar { width: 22px; height: 22px; font-size: 11px; }
 #sugestoes .opcao.sel { background: var(--bg4); }
+
+/* ---------- topo: busca e fixadas ---------- */
+#mainHeader { align-items: center; }
+.acoes-topo { margin-left: auto; display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.acoes-topo .icon { color: var(--muted); } .acoes-topo .icon:hover { color: var(--text); }
+.busca { display: flex; align-items: center; gap: 6px; margin: 0; background: var(--bg0); border: 1px solid var(--bg4); border-radius: 6px; padding: 0 8px; text-transform: none; }
+.busca:focus-within { border-color: var(--accent); }
+.busca .ic { width: 15px; height: 15px; color: var(--muted); }
+.busca input { border: 0; padding: 5px 0; width: 150px; margin: 0; font-size: 13px; background: transparent; transition: width .15s; }
+.busca input:focus { width: 220px; }
+#app { position: relative; }
+#painel { position: absolute; top: 0; right: 0; bottom: 0; width: 340px; background: var(--bg1); border-left: 1px solid var(--line); z-index: 12; display: flex; flex-direction: column; box-shadow: -8px 0 24px #0006; }
+body.com-barra #painel { top: 0; }
+.painel-topo { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+#painelLista { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+#painelLista .vazio { padding: 16px 8px; text-align: center; }
+.cartao { display: block; width: 100%; text-align: left; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.cartao:hover { border-color: var(--accent); filter: none; }
+.cartao .topo { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; min-width: 0; }
+.cartao .topo .avatar { width: 20px; height: 20px; font-size: 10px; }
+.cartao .topo .muted { margin-left: auto; white-space: nowrap; }
+.cartao .texto { font-size: 14px; white-space: pre-wrap; word-wrap: break-word; max-height: 7.5em; overflow: hidden; }
+.cartao .texto .codigo { font-family: Consolas, monospace; font-size: 12px; background: var(--bg0); padding: 0 4px; border-radius: 3px; }
+.marca-fixada { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--accent); margin-top: 2px; }
+.marca-fixada .ic { width: 12px; height: 12px; }
+.voltar-fim { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 12px auto 4px; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 13px; }
+.voltar-fim .ic { width: 16px; height: 16px; }
+
+/* ---------- emojis ---------- */
+.seletor-emoji { position: fixed; z-index: 55; width: 330px; background: var(--bg0); border: 1px solid var(--bg4); border-radius: 10px; box-shadow: 0 10px 30px #000b; padding: 6px; }
+.seletor-emoji .abas { display: flex; gap: 2px; border-bottom: 1px solid var(--bg4); padding-bottom: 5px; }
+.seletor-emoji .abas button { background: none; padding: 4px 6px; font-size: 17px; border-radius: 6px; opacity: .6; }
+.seletor-emoji .abas button.sel { background: var(--bg3); opacity: 1; }
+.seletor-emoji .grade { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 230px; overflow-y: auto; margin-top: 5px; }
+.seletor-emoji .grade button { background: none; padding: 4px 0; font-size: 22px; line-height: 1.2; border-radius: 6px; }
+.seletor-emoji .grade button:hover { background: var(--bg3); filter: none; }
+.menu-reacoes button .ic { width: 18px; height: 18px; display: block; }
+
+/* ---------- foto e status ---------- */
+.ponto-status { position: absolute; right: -2px; bottom: -2px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--bg1); background: var(--green); }
+.ponto-status.ausente { background: #e3c26f; }
+.ponto-status.ocupado { background: var(--red); }
+#userPanel .ponto-status { border-color: var(--panel); }
+.info-membro { min-width: 0; }
+.info-membro .recado { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perfil { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
+.perfil .row { margin-top: 6px; }
+.perfil .row button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; } .perfil .row .ic { width: 15px; height: 15px; }
+.avatar.grande { width: 72px; height: 72px; font-size: 30px; }
+.me-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -173,3 +173,64 @@ test('mensagens antigas vêm em páginas', async () => {
   assert.equal(b.welcome.ultimas[ch.id].uid, a.me.uid);
   a.fechar(); b.fechar();
 });
+
+test('busca sem acento acha com acento, e não mostra DMs dos outros', async () => {
+  const a = await entrar(srv, 'Quésia');
+  const b = await entrar(srv, 'Rui');
+  const dm = 'dm:' + [a.me.uid, b.me.uid].sort().join(':');
+  a.mandar({ t: 'msg', channel: 'geral', text: 'Vamos jogar Valheim amanhã?' });
+  a.mandar({ t: 'msg', channel: dm, text: 'valheim segredo' });
+  await b.esperar('msg', (x) => x.message.text === 'valheim segredo');
+  const c = await entrar(srv, 'Sara');
+  c.mandar({ t: 'buscar', texto: 'AMANHA' });
+  const r = await c.esperar('resultados');
+  assert.ok(r.itens.some((i) => i.message.text.includes('amanhã')));
+  c.mandar({ t: 'buscar', texto: 'valheim' });
+  const r2 = await c.esperar('resultados', (x) => x.texto === 'valheim');
+  assert.ok(!r2.itens.some((i) => i.channel === dm));
+  b.mandar({ t: 'buscar', texto: 'valheim' });
+  const r3 = await b.esperar('resultados');
+  assert.ok(r3.itens.some((i) => i.channel === dm));
+  a.fechar(); b.fechar(); c.fechar();
+});
+
+test('fixar e desafixar mensagem', async () => {
+  const a = await entrar(srv, 'Téo');
+  a.mandar({ t: 'msg', channel: 'geral', text: 'regras do grupo' });
+  const { message } = await a.esperar('msg', (x) => x.message.text === 'regras do grupo');
+  a.mandar({ t: 'fixar', channel: 'geral', id: message.id, fixar: true });
+  const up = await a.esperar('msg_update', (x) => x.message.id === message.id);
+  assert.equal(up.message.fixada.por, 'Téo');
+  a.mandar({ t: 'fixadas', channel: 'geral' });
+  const f = await a.esperar('fixadas');
+  assert.ok(f.messages.some((x) => x.id === message.id));
+  a.mandar({ t: 'fixar', channel: 'geral', id: message.id, fixar: false });
+  const up2 = await a.esperar('msg_update', (x) => x.message.id === message.id && !x.message.fixada);
+  assert.ok(up2);
+  a.mandar({ t: 'cercanias', channel: 'geral', id: message.id });
+  const cer = await a.esperar('cercanias');
+  assert.ok(cer.messages.some((x) => x.id === message.id));
+  a.fechar();
+});
+
+test('foto de perfil e status', async () => {
+  const a = await entrar(srv, 'Uma');
+  const b = await entrar(srv, 'Vini');
+  // um arquivo que não é imagem é recusado
+  const txt = await (await fetch(`${srv.base}/api/upload?kind=file`, { method: 'POST', body: 'x', headers: { 'x-token': a.welcome.token, 'content-type': 'text/plain' } })).json();
+  a.mandar({ t: 'perfil', foto: txt.id });
+  assert.ok(await a.esperar('error'));
+  const png = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
+  const img = await (await fetch(`${srv.base}/api/upload?kind=file`, { method: 'POST', body: png, headers: { 'x-token': a.welcome.token, 'content-type': 'image/png' } })).json();
+  a.mandar({ t: 'perfil', foto: img.id, status: { tipo: 'ocupado', texto: 'jogando Valheim' } });
+  const u = await b.esperar('users', (x) => x.users.some((y) => y.uid === a.me.uid && y.foto === img.id));
+  const eu = u.users.find((y) => y.uid === a.me.uid);
+  assert.deepEqual(eu.status, { tipo: 'ocupado', texto: 'jogando Valheim' });
+  const f = await b.esperar('fotos', (x) => x.fotos[a.me.uid] === img.id);
+  assert.ok(f);
+  // a foto não é apagada como "arquivo sem mensagem"
+  assert.equal((await fetch(`${srv.base}/files/${img.id}?t=${a.welcome.token}`)).status, 200);
+  a.mandar({ t: 'perfil', foto: null, status: { tipo: 'online' } });
+  await b.esperar('users', (x) => x.users.some((y) => y.uid === a.me.uid && !y.foto && !y.status));
+  a.fechar(); b.fechar();
+});

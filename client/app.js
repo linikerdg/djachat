@@ -19,6 +19,8 @@ const S = {
   messages: {},            // channelId -> [msg]
   loaded: new Set(),       // canais cujo histórico já veio do servidor
   unread: new Set(),
+  fotos: {},               // uid -> id do arquivo da foto de perfil
+  lacuna: {},              // channelId -> true quando a lista aberta é um trecho antigo (busca, fixada)
   mencoes: {},             // channelId -> quantas menções a mim ainda não vistas
   mais: {},                // channelId -> true se há mensagens mais antigas no servidor
   lidas: LS.get('lidas', {}),   // channelId -> ts da última mensagem que eu vi
@@ -115,6 +117,7 @@ function handle(m) {
       const i = lista ? lista.findIndex((x) => x.id === m.message.id) : -1;
       if (i >= 0) lista[i] = m.message;
       if (m.message.channel === S.current && S.view === 'text') atualizarLinha(m.message);
+      if (S.painel === 'fixadas' && m.message.channel === S.current) send({ t: 'fixadas', channel: S.current });
       break;
     }
     case 'msg_delete': {
@@ -133,7 +136,7 @@ function handle(m) {
       $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
       $('#connDot').className = 'dot ok'; $('#connDot').title = 'Conectado';
       $('#meName').textContent = S.me.name; paintAvatar($('#meAvatar'), S.me);
-      S.messages = {}; S.loaded = new Set(); S.mais = {};
+      S.messages = {}; S.loaded = new Set(); S.mais = {}; S.lacuna = {}; S.fotos = m.fotos || {};
       marcarNaoLidas(m.ultimas || {});
       const first = canalInfo(LS.get('lastChannel')) || S.channels.find((c) => c.kind === 'text');
       if (first) openText(first.id);
@@ -159,6 +162,8 @@ function handle(m) {
       if (S.voice) for (const [id, b] of before) {
         if (id !== S.me.id && b.voice === S.voice && !S.users.find((u) => u.id === id && u.voice === S.voice)) playTone('leave');
       }
+      const eu = S.users.find((u) => u.id === S.me.id);
+      if (eu) { S.me = eu; paintAvatar($('#meAvatar'), eu); mostrarMeuStatus(); }
       renderChannels(); renderMembers(); renderVoiceView();
       break;
     }
@@ -180,9 +185,11 @@ function handle(m) {
       break;
     case 'msg': {
       const msg = m.message;
-      (S.messages[msg.channel] ||= []).push(msg);
+      // vendo um trecho antigo: a nova não entra na lista (ela aparece ao voltar para as mais recentes)
+      const lacuna = S.lacuna[msg.channel];
+      if (!lacuna) (S.messages[msg.channel] ||= []).push(msg);
       if (S.typing[msg.channel]) delete S.typing[msg.channel][msg.authorId];
-      const vendo = msg.channel === S.current && S.view === 'text';
+      const vendo = !lacuna && msg.channel === S.current && S.view === 'text';
       const mencao = !souEu(msg) && mencionaNome(msg.text, S.me.name);
       if (vendo) { appendMessage(msg); if (document.hasFocus()) marcarLido(msg.channel); }
       if (!souEu(msg) && !vendo) {
@@ -191,7 +198,7 @@ function handle(m) {
         renderChannels();
       }
       // menção toca mesmo em canal silenciado
-      if (!souEu(msg) && (mencao || !S.silenciados.has(msg.channel)) && (!document.hasFocus() || msg.channel !== S.current)) {
+      if (!souEu(msg) && !ocupado() && (mencao || !S.silenciados.has(msg.channel)) && (!document.hasFocus() || msg.channel !== S.current)) {
         playTone(mencao ? 'mencao' : 'msg');
         if (window.djachatDesktop) window.djachatDesktop.flash();
       }
@@ -203,6 +210,22 @@ function handle(m) {
       renderTyping();
       break;
     case 'ice': S.ice = m.ice; break;
+    case 'fotos':
+      S.fotos = m.fotos;
+      paintAvatar($('#meAvatar'), S.me); mostrarMeuStatus();
+      if (S.view === 'text') renderMessages(true);
+      break;
+    case 'resultados': mostrarResultados(m); break;
+    case 'fixadas': if (m.channel === S.current) mostrarFixadas(m.messages); break;
+    case 'cercanias': {
+      // um trecho antigo da conversa, em volta da mensagem procurada
+      S.messages[m.channel] = m.messages;
+      S.mais[m.channel] = !!m.mais;
+      S.lacuna[m.channel] = !!m.depois;
+      S.loaded.add(m.channel);
+      if (m.channel === S.current && S.view === 'text') { renderMessages(true); irPara(m.id); }
+      break;
+    }
     case 'sounds': S.sounds = m.sounds; renderSounds(); break;
     case 'sound_play': playSound(m.id); break;
     case 'voice_joined': startVoice(m.channel, m.peers); break;
@@ -238,7 +261,7 @@ function renderChannels() {
   for (const d of S.dms) {
     const row = el('div', 'chan dm');
     const online = S.users.find((u) => u.uid === d.outro);
-    const av = el('div', 'avatar'); paintAvatar(av, { name: d.name, color: online ? online.color : null });
+    const av = el('div', 'avatar'); paintAvatar(av, { name: d.name, uid: d.outro, color: online ? online.color : null });
     row.append(av, el('span', 'name', d.name));
     if (d.id === S.current && S.view === 'text') row.classList.add('active');
     if (S.unread.has(d.id)) row.classList.add('unread');
@@ -300,9 +323,10 @@ function renderMembers() {
   for (const u of S.users) {
     const r = el('div', 'member'); r.dataset.uid = u.id;
     r.oncontextmenu = (e) => menuPessoa(e, u);
-    const av = el('div', 'avatar'); paintAvatar(av, u);
-    const info = el('div');
+    const av = el('div', 'avatar'); paintAvatar(av, u); pontoStatus(av, u);
+    const info = el('div', 'info-membro');
     info.append(el('div', null, u.name + (u.id === S.me?.id ? ' (você)' : '')));
+    if (u.status && u.status.texto) info.append(el('div', 'muted small recado', u.status.texto));
     if (u.id !== S.me?.id && S.mutados.has(chavePessoa(u))) { const mu = ic('volume-x', 'mutado-por-mim'); mu.setAttribute('aria-label', 'mutado por você'); info.firstChild.append(' ', mu); }
     if (u.voice) { const ch = S.channels.find((c) => c.id === u.voice); const v = el('div', 'muted small na-voz'); v.append(ic('volume-2'), ch ? ch.name : 'voz'); info.append(v); }
     r.append(av, info);
@@ -312,8 +336,16 @@ function renderMembers() {
 }
 
 function paintAvatar(node, u) {
-  node.textContent = (u.name || '?').trim().charAt(0).toUpperCase();
-  node.style.background = u.color || '#d8b45f';
+  const foto = u.foto || (u.uid && S.fotos[u.uid]);
+  const cor = u.color || '#d8b45f';
+  node.textContent = foto ? '' : (u.name || '?').trim().charAt(0).toUpperCase();
+  node.style.background = foto && /^[a-f0-9]{16}$/.test(foto) ? `center / cover no-repeat url("${fileUrl(foto)}"), ${cor}` : cor;
+}
+// bolinha de status no canto do avatar
+function pontoStatus(av, u) {
+  const tipo = (u.status && u.status.tipo) || 'online';
+  const p = el('span', 'ponto-status ' + tipo); p.title = { online: 'Online', ausente: 'Ausente', ocupado: 'Ocupado (sem avisos)' }[tipo];
+  av.style.position = 'relative'; av.append(p);
 }
 
 // ================================================================ texto
@@ -350,6 +382,11 @@ function renderMessages(manterPosicao) {
       if (lastRendered) lastRendered = { ts: lastRendered.ts };
     }
     appendMessage(m, true);
+  }
+  if (S.lacuna[S.current]) {
+    const v = el('button', 'voltar-fim'); v.type = 'button'; v.append(ic('arrow-down-to-line'), 'Você está vendo mensagens antigas. Ir para as mais recentes');
+    v.onclick = voltarAoFim;
+    box.append(v);
   }
   if (manterPosicao === 'topo') box.scrollTop = box.scrollHeight - doFim;
   else if (manterPosicao) box.scrollTop = pos;
@@ -412,7 +449,7 @@ function criarLinha(m, grouped) {
   const left = el('div');
   const body = el('div', 'corpo');
   if (!grouped) {
-    const av = el('div', 'avatar'); paintAvatar(av, { name: m.author, color: m.color }); left.append(av);
+    const av = el('div', 'avatar'); paintAvatar(av, { name: m.author, uid: m.uid, color: m.color }); left.append(av);
     const meta = el('div', 'meta');
     const b = el('b', null, m.author); b.style.color = m.color;
     meta.append(b, el('span', 'time', d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })));
@@ -435,6 +472,10 @@ function criarLinha(m, grouped) {
     body.append(t);
   }
   for (const a of m.attachments || []) if (a && a.mime) body.append(renderAttachment(a, m));
+  if (m.fixada) {
+    const f = el('span', 'marca-fixada'); f.append(ic('pin'), 'fixada'); f.title = 'Fixada por ' + m.fixada.por;
+    body.append(f);
+  }
   const reacoes = Object.entries(m.reacoes || {});
   if (reacoes.length) {
     const rr = el('div', 'reacoes');
@@ -1324,6 +1365,23 @@ $('#btnSettings').onclick = async () => {
   let devices = [];
   try { devices = await navigator.mediaDevices.enumerateDevices(); } catch { /* */ }
   const body = el('div');
+  // perfil: foto e status
+  const perfil = el('div', 'perfil');
+  const avP = el('div', 'avatar grande'); paintAvatar(avP, S.me);
+  const bFoto = el('button'); bFoto.type = 'button'; rotular(bFoto, 'image-plus', 'Trocar foto'); bFoto.onclick = escolherFoto;
+  const bSemFoto = el('button'); bSemFoto.type = 'button'; rotular(bSemFoto, 'x', 'Tirar foto'); bSemFoto.onclick = () => send({ t: 'perfil', foto: null });
+  const botoesFoto = el('div', 'row'); botoesFoto.append(bFoto, bSemFoto);
+  const ladoP = el('div'); ladoP.append(el('b', null, S.me.name), botoesFoto);
+  perfil.append(avP, ladoP);
+  if (!S.me.uid) perfil.classList.add('hidden');
+  body.append(el('label', null, 'Seu perfil'), perfil);
+  const stSel = el('select');
+  for (const [v, t] of [['online', 'Online'], ['ausente', 'Ausente'], ['ocupado', 'Ocupado (sem sons de mensagem)']]) stSel.append(new Option(t, v));
+  stSel.value = meuTipo();
+  const stL = el('label', null, 'Status'); stL.append(stSel);
+  const recado = el('input'); recado.maxLength = 60; recado.placeholder = 'Recado (ex.: jogando Valheim)'; recado.value = (S.me.status && S.me.status.texto) || '';
+  const rcL = el('label', null, 'Recado'); rcL.append(recado);
+  if (S.me.uid) body.append(stL, rcL);
   const mkSelect = (label, kind, current) => {
     const l = el('label', null, label); const s = el('select');
     s.append(new Option('Padrão do sistema', ''));
@@ -1386,6 +1444,7 @@ $('#btnSettings').onclick = async () => {
     const micChanged = inSel.value !== S.inputId || noise.checked !== LS.get('noise', true);
     S.inputId = inSel.value; S.outputId = outSel.value;
     LS.set('inputId', S.inputId); LS.set('outputId', S.outputId); LS.set('noise', noise.checked); LS.set('screenQuality', qs.value);
+    if (S.me.uid && (stSel.value !== meuTipo() || recado.value.trim() !== ((S.me.status && S.me.status.texto) || ''))) definirStatus(stSel.value, recado.value.trim());
     for (const p of S.peers.values()) for (const item of p.audios.values()) if (item.a.setSinkId) item.a.setSinkId(S.outputId).catch(() => {});
     if (S.audioCtx && S.audioCtx.setSinkId) S.audioCtx.setSinkId(S.outputId).catch(() => {});
     if (micChanged && S.mic) await swapMic();
@@ -1609,6 +1668,11 @@ function menuProprio(e) {
     { rotulo: S.deafened ? 'Voltar a ouvir' : 'Ensurdecer', icone: S.deafened ? 'headphones' : 'headphone-off', acao: () => $('#btnDeafen').click() },
     S.voice ? { rotulo: 'Sair da sala de voz', icone: 'phone-off', perigo: true, acao: () => send({ t: 'voice_leave' }) } : null,
     '-',
+    { titulo: 'Status' },
+    ...['online', 'ausente', 'ocupado'].map((tipo) => ({ rotulo: { online: 'Online', ausente: 'Ausente', ocupado: 'Ocupado (sem avisos)' }[tipo] + (meuTipo() === tipo ? '  ✓' : ''), icone: tipo === 'ocupado' ? 'bell-off' : tipo === 'ausente' ? 'eye-off' : 'check-check', acao: () => definirStatus(tipo) })),
+    { rotulo: 'Escrever um recado…', icone: 'pencil', acao: () => promptModal('Recado', 'Aparece embaixo do seu nome (ex.: jogando Valheim)', (S.me.status && S.me.status.texto) || '', (t) => definirStatus(meuTipo(), t)) },
+    S.me.status && S.me.status.texto ? { rotulo: 'Apagar recado', icone: 'x', acao: () => definirStatus(meuTipo(), '') } : null,
+    '-',
     { rotulo: 'Copiar meu nome', icone: 'copy', acao: () => copiarTexto(S.me.name, 'Nome copiado') },
     { rotulo: 'Configurações', icone: 'settings', acao: () => $('#btnSettings').click() },
   ]);
@@ -1626,6 +1690,9 @@ function itensMensagem(m) {
       b.onclick = () => { fecharMenu(); reagir(m, emoji); };
       reacoes.append(b);
     }
+    const mais = el('button', null); mais.type = 'button'; mais.title = 'Outro emoji'; mais.append(ic('smile-plus'));
+    mais.onclick = () => { const r = mais.getBoundingClientRect(); fecharMenu(); abrirSeletorEmoji({ x: r.left, y: r.top, getBoundingClientRect: () => r }, (e) => reagir(m, e)); };
+    reacoes.append(mais);
   }
   return [
     reacoes ? { no: reacoes } : null,
@@ -1633,6 +1700,7 @@ function itensMensagem(m) {
     sel ? { rotulo: 'Copiar seleção', icone: 'copy', acao: () => copiarTexto(sel) } : null,
     m.text ? { rotulo: 'Copiar texto', icone: 'copy', acao: () => copiarTexto(m.text) } : null,
     { rotulo: 'Mencionar ' + m.author, icone: 'at-sign', acao: () => mencionar(m.author) },
+    { rotulo: m.fixada ? 'Desafixar' : 'Fixar mensagem', icone: m.fixada ? 'pin-off' : 'pin', acao: () => send({ t: 'fixar', channel: m.channel, id: m.id, fixar: !m.fixada }) },
     minha ? '-' : null,
     minha ? { rotulo: 'Editar', icone: 'pencil', acao: () => editarMensagem(m) } : null,
     minha ? { rotulo: 'Apagar', icone: 'trash-2', perigo: true, acao: () => apagarMensagem(m) } : null,
@@ -1749,6 +1817,134 @@ function toast(text) {
   const t = $('#toast'); t.textContent = text; t.classList.remove('hidden');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 3500);
 }
+
+// ================================================================ status e foto de perfil
+const meuTipo = () => (S.me && S.me.status && S.me.status.tipo) || 'online';
+const ocupado = () => meuTipo() === 'ocupado';
+function definirStatus(tipo, texto) {
+  if (!S.me.uid) return toast('Atualize o DJAchat para usar status.');
+  S.ausenteAutomatico = false;
+  send({ t: 'perfil', status: { tipo, texto: texto === undefined ? ((S.me.status && S.me.status.texto) || '') : texto } });
+}
+function mostrarMeuStatus() {
+  const st = S.me.status;
+  $('#userPanel .me-name span').textContent = st && st.texto ? st.texto : { online: 'online', ausente: 'ausente', ocupado: 'ocupado' }[meuTipo()];
+  const av = $('#meAvatar'); av.querySelectorAll('.ponto-status').forEach((p) => p.remove()); pontoStatus(av, S.me);
+}
+// sem mexer no mouse e no teclado por 10 minutos: ausente (volta sozinho)
+let ultimoMovimento = Date.now();
+for (const ev of ['mousemove', 'keydown', 'mousedown', 'wheel']) {
+  window.addEventListener(ev, () => {
+    ultimoMovimento = Date.now();
+    if (S.ausenteAutomatico && S.connected) { S.ausenteAutomatico = false; send({ t: 'perfil', status: { tipo: 'online', texto: (S.me.status && S.me.status.texto) || '' } }); }
+  }, { passive: true });
+}
+setInterval(() => {
+  if (!S.connected || !S.me || !S.me.uid || meuTipo() !== 'online' || S.voice) return;
+  if (Date.now() - ultimoMovimento > 10 * 60000) { S.ausenteAutomatico = true; send({ t: 'perfil', status: { tipo: 'ausente', texto: (S.me.status && S.me.status.texto) || '' } }); }
+}, 30000);
+
+// a foto vira um quadrado de 256 px antes de subir (fica leve para todo mundo)
+async function escolherFoto() {
+  const inp = el('input'); inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/gif,image/webp';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try {
+      const bmp = await createImageBitmap(f);
+      const lado = Math.min(bmp.width, bmp.height), t = 256;
+      const c = document.createElement('canvas'); c.width = c.height = t;
+      c.getContext('2d').drawImage(bmp, (bmp.width - lado) / 2, (bmp.height - lado) / 2, lado, lado, 0, 0, t, t);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/webp', 0.9));
+      const arq = new File([blob], 'foto.webp', { type: 'image/webp' });
+      const enviado = await enviarArquivo(arq);
+      send({ t: 'perfil', foto: enviado.id });
+      toast('Foto trocada');
+    } catch (e) { toast('Não consegui usar essa imagem: ' + e.message); }
+  };
+  inp.click();
+}
+
+// ================================================================ busca e mensagens fixadas
+function abrirPainel(titulo) {
+  $('#painelTitulo').textContent = titulo;
+  $('#painel').classList.remove('hidden');
+  return $('#painelLista');
+}
+function fecharPainel() { $('#painel').classList.add('hidden'); $('#painelLista').replaceChildren(); S.painel = null; }
+$('#painelFechar').onclick = fecharPainel;
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.painel && !menuAberto && !seletorAberto) fecharPainel();
+  if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'f' && S.me) { e.preventDefault(); $('#busca').focus(); $('#busca').select(); }
+});
+$('#busca').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const t = $('#busca').value.trim();
+    if (t.length < 2) return toast('Digite pelo menos 2 letras');
+    S.painel = 'busca';
+    abrirPainel('Buscando…').replaceChildren(el('div', 'muted small vazio', 'Procurando em todas as conversas…'));
+    send({ t: 'buscar', texto: t });
+  } else if (e.key === 'Escape') { $('#busca').value = ''; $('#busca').blur(); }
+});
+$('#btnFixadas').onclick = () => {
+  if (S.painel === 'fixadas') return fecharPainel();
+  if (!S.current) return;
+  S.painel = 'fixadas';
+  abrirPainel('Fixadas').replaceChildren(el('div', 'muted small vazio', 'Carregando…'));
+  send({ t: 'fixadas', channel: S.current });
+};
+function nomeDoCanal(id) {
+  const c = canalInfo(id);
+  return c ? (c.kind === 'dm' ? '@' + c.name : '#' + c.name) : '?';
+}
+// um cartão de mensagem para o painel; clicar leva até ela
+function cartaoMensagem(canal, m) {
+  const c = el('button', 'cartao'); c.type = 'button';
+  const topo = el('div', 'topo');
+  const av = el('div', 'avatar'); paintAvatar(av, { name: m.author, uid: m.uid, color: m.color });
+  const quem = el('b', null, m.author); quem.style.color = m.color;
+  const d = new Date(m.ts);
+  topo.append(av, quem, el('span', 'muted small', nomeDoCanal(canal) + ' · ' + d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })));
+  const t = el('div', 'texto');
+  if (m.text) formatar(t, m.text.length > 300 ? m.text.slice(0, 300) + '…' : m.text, { nomes: nomesConhecidos(), meuNome: S.me.name });
+  else if (m.attachments && m.attachments.length) t.append(el('span', 'muted', '📎 ' + m.attachments.map((a) => a.name).join(', ')));
+  c.append(topo, t);
+  c.onclick = () => irParaMensagem(canal, m.id);
+  return c;
+}
+function mostrarResultados(r) {
+  if (S.painel !== 'busca') return;
+  const lista = abrirPainel(r.total ? `${r.total} resultado${r.total > 1 ? 's' : ''}` + (r.total > r.itens.length ? ` (os ${r.itens.length} mais novos)` : '') : 'Nada encontrado');
+  lista.replaceChildren();
+  if (!r.itens.length) lista.append(el('div', 'muted small vazio', `Nenhuma mensagem com "${r.texto}".`));
+  for (const it of r.itens) lista.append(cartaoMensagem(it.channel, it.message));
+}
+function mostrarFixadas(msgs) {
+  if (S.painel !== 'fixadas') return;
+  const lista = abrirPainel('Fixadas em ' + nomeDoCanal(S.current));
+  lista.replaceChildren();
+  if (!msgs.length) lista.append(el('div', 'muted small vazio', 'Nenhuma mensagem fixada aqui. Clique com o botão direito numa mensagem → Fixar.'));
+  for (const m of msgs) lista.append(cartaoMensagem(m.channel, m));
+}
+// abre o canal e rola até a mensagem; se ela não estiver carregada, pede o trecho em volta dela
+function irParaMensagem(canal, id) {
+  if (S.current !== canal || S.view !== 'text') openText(canal);
+  const l = S.messages[canal];
+  if (l && l.some((x) => x.id === id)) return irPara(id);
+  send({ t: 'cercanias', channel: canal, id });
+}
+function voltarAoFim() {
+  S.lacuna[S.current] = false;
+  S.loaded.delete(S.current);
+  send({ t: 'history', channel: S.current });
+}
+
+// ================================================================ emojis na caixa de mensagem
+$('#btnEmoji').onclick = () => abrirSeletorEmoji($('#btnEmoji'), (e) => {
+  const ini = input.selectionStart ?? input.value.length, fim = input.selectionEnd ?? ini;
+  input.value = input.value.slice(0, ini) + e + input.value.slice(fim);
+  input.focus(); input.setSelectionRange(ini + e.length, ini + e.length);
+  input.dispatchEvent(new Event('input'));
+});
 
 // ================================================================ início
 // Não há "sair da voz" ao sair da página: esse evento também dispara em navegações que o app bloqueia
