@@ -171,10 +171,11 @@ function enviarRemoto() {
   if (enviandoRemoto) { agendarRemoto(); return enviandoRemoto; }
   if (!sync.pendente || !compartilhado.ativa) return Promise.resolve();
   const marca = mudancas, versao = sync.versao + 1;
-  const texto = JSON.stringify({ ...db, versao });
+  // cópia rasa: uma mensagem nova durante o envio não entra pela metade (ela vai no próximo)
+  const copia = { ...db, messages: Object.fromEntries(Object.entries(db.messages).map(([k, l]) => [k, l.slice()])) };
   enviandoRemoto = (async () => {
     try {
-      await compartilhado.salvarBanco(texto);
+      await compartilhado.salvarBanco(copia, versao);
       sync.versao = versao;
       if (mudancas === marca) sync.pendente = false;
       try { gravarLocal(); } catch { /* a próxima gravação local acerta */ }
@@ -204,7 +205,18 @@ async function iniciarCompartilhado() {
     catch (e) { if (e.codigo !== 'conflito') throw e; grupo = await compartilhado.lerConfig(); }
   }
 
-  const remoto = await compartilhado.lerBanco();
+  const lido = await compartilhado.lerBanco({
+    aoAntigoMudar(velho) {
+      // um servidor sem atualizar abriu depois da conversão e gravou no formato antigo
+      const copia = path.join(DATA_DIR, `db.formato-antigo-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+      fs.writeFileSync(copia, JSON.stringify(velho));
+      console.log('  ATENÇÃO: alguém abriu o servidor com uma versão antiga do DJAchat depois da atualização.');
+      console.log(`  O que ele gravou não entra aqui; ficou guardado em ${copia}`);
+      console.log('  Peça para todo mundo que hospeda atualizar o DJAchat.');
+    },
+  });
+  const remoto = lido && lido.dados;
+  if (lido && lido.antigo) console.log(`  Convertendo os dados do grupo para o formato novo (${contarMensagens(remoto)} mensagens).`);
   if (!remoto) {
     console.log(`  Primeira vez no OneDrive: enviando os dados deste PC (${contarMensagens(db)} mensagens).`);
     sync = { versao: 0, pendente: true, compartilhado: true };
@@ -230,8 +242,12 @@ async function iniciarCompartilhado() {
   }
   db = { ...dbVazio(), ...remoto };
   normalizarDb();
-  sync = { versao: versaoRemota, pendente: false, compartilhado: true };
+  sync = { versao: versaoRemota, pendente: !!(lido.antigo || lido.avisou), compartilhado: true };
   gravarLocal();
+  if (lido.antigo || lido.avisou) {
+    await enviarRemoto();
+    if (sync.pendente) throw new Error('não consegui gravar os dados do grupo no formato novo');
+  }
   return grupo;
 }
 
@@ -948,7 +964,8 @@ async function conectarOneDrive() {
     console.log('  OneDrive conectado.');
   }
   try {
-    const dados = await criarCompartilhado({ oneDrive, aoPerder() {} }).lerBanco();
+    const lido = await criarCompartilhado({ oneDrive, aoPerder() {} }).lerBanco();
+    const dados = lido && lido.dados;
     if (dados) console.log(`  Achei os dados do grupo nesta conta: ${contarMensagens(dados)} mensagens em ${(dados.channels || []).length} canais.`);
     else console.log('  Esta conta ainda não tem dados do DJAchat: o servidor envia os deste PC ao abrir.');
   } catch (e) { console.log(`  (não consegui conferir os dados agora: ${e.message})`); }

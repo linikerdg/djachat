@@ -130,6 +130,8 @@ Use o código em poucos dias. No PC novo, dê dois cliques em `conectar-onedrive
 
 No fim, o terminal confirma quantas mensagens achou na conta.
 
+**Todo mundo que hospeda precisa da mesma versão.** As conversas ficam no OneDrive com um arquivo por canal, e cada mudança envia só o canal que mudou. Na primeira vez que um servidor atualizado abre, ele converte os dados do formato antigo (que fica lá como cópia). Se depois disso alguém abrir o servidor com uma versão antiga, o que ele gravar não aparece para os outros: o servidor atualizado avisa e guarda essas conversas numa cópia em `server/data/`.
+
 **Só um servidor por vez.** Quem abre o servidor segura uma trava no OneDrive. Se outro PC tentar abrir junto, aparece "o servidor já está aberto em ...". Se o PC que hospedava desligou sem fechar o servidor, espere 2 minutos e abra de novo. Feche o servidor pela janela (ou com Ctrl+C) para ele enviar as últimas mudanças e liberar a trava na hora.
 
 Na primeira vez, o servidor envia para o OneDrive as conversas e os arquivos que já estavam no PC. Se um PC tinha conversas diferentes das do OneDrive, valem as do OneDrive, e as dele ficam guardadas em `server/data/db.so-neste-pc-....json`. A senha é a do grupo: o terminal mostra qual é ao iniciar. A chave do TURN de quem conectou primeiro também fica disponível para os outros servidores, a menos que eles tenham a própria.

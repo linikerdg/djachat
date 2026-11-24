@@ -7,7 +7,9 @@ const crypto = require('crypto');
 const os = require('os');
 
 const TRAVA = 'estado/trava.json';
-const BANCO = 'estado/db.json';
+const BANCO = 'estado/db.json';          // formato antigo: tudo num arquivo só
+const BANCO2 = 'estado/v2/db.json';      // formato 2: canais, arquivos, sons e contas
+const MENSAGENS = 'estado/v2/mensagens'; // formato 2: um arquivo de mensagens por canal
 const CONFIG = 'estado/config.json';
 
 function criarCompartilhado({ oneDrive, prazoMs = 120000, batidaMs = Math.min(30000, prazoMs / 4), aoPerder }) {
@@ -67,16 +69,76 @@ function criarCompartilhado({ oneDrive, prazoMs = 120000, batidaMs = Math.min(30
     await oneDrive.apagarSeIgual(TRAVA, etagTrava);
   }
 
-  // Grava o banco só se for a versão que este servidor leu ou gravou por último
-  async function salvarBanco(texto) {
+  // ------------------------------------------------------------ banco (formato 2)
+  // As mensagens ficam num arquivo por canal (estado/v2/mensagens/<canal>.json) e o resto num arquivo
+  // pequeno (estado/v2/db.json). Cada envio leva só os canais que mudaram, e por último o db.json,
+  // que só é gravado se for a versão que este servidor leu ou gravou (é ele que "confirma" o envio).
+  // O formato antigo (estado/db.json, tudo num arquivo só) é lido uma vez e convertido; ele fica
+  // lá parado, como cópia.
+  const enviados = new Map();   // canal -> hash do conteúdo que está no OneDrive
+  const hash = (texto) => crypto.createHash('sha1').update(texto).digest('hex');
+  const arquivoCanal = (canal) => `${MENSAGENS}/${String(canal).replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+
+  // Grava o banco: canais mudados, canais apagados e, por fim, o db.json
+  async function salvarBanco(db, versao) {
     if (perdida) throw Object.assign(new Error('a trava foi perdida'), { codigo: 'conflito' });
-    const r = await oneDrive.gravarJson(BANCO, texto, etagBanco ? { etag: etagBanco } : { criar: true });
+    const { messages, ...resto } = db;
+    const novos = new Map();
+    for (const [canal, lista] of Object.entries(messages)) {
+      const texto = JSON.stringify(lista);
+      const h = hash(texto);
+      novos.set(canal, h);
+      if (enviados.get(canal) === h) continue;
+      await oneDrive.gravarJson(arquivoCanal(canal), texto);
+      enviados.set(canal, h);
+      if (perdida) throw Object.assign(new Error('a trava foi perdida'), { codigo: 'conflito' });
+    }
+    const meta = JSON.stringify({ ...resto, versao, canais: [...novos.keys()], ...(migradoDe ? { migradoDe } : {}) });
+    const r = await oneDrive.gravarJson(BANCO2, meta, etagBanco ? { etag: etagBanco } : { criar: true });
     etagBanco = r.etag;
+    // só depois do db.json novo: os canais que ele não lista mais podem sair
+    for (const canal of [...enviados.keys()]) {
+      if (novos.has(canal)) continue;
+      enviados.delete(canal);
+      await oneDrive.apagarCaminho(arquivoCanal(canal)).catch(() => {});
+    }
   }
-  async function lerBanco() {
-    const r = await oneDrive.lerJson(BANCO);
-    etagBanco = r ? r.etag : null;
-    return r && r.dados;
+
+  let migradoDe = null;   // etag do db.json antigo no momento da conversão
+  // Lê o banco inteiro: { dados, antigo } ou null quando a conta ainda não tem dados.
+  // antigo = veio do formato antigo e precisa ser enviado inteiro no formato novo.
+  // aoAntigoMudar(dados): o db.json antigo mudou depois da conversão (um servidor sem atualizar abriu).
+  async function lerBanco({ aoAntigoMudar } = {}) {
+    const r = await oneDrive.lerJson(BANCO2);
+    if (!r) {
+      enviados.clear();
+      const velho = await oneDrive.lerJson(BANCO);
+      etagBanco = null;
+      if (!velho) return null;
+      migradoDe = velho.etag;
+      return { dados: velho.dados, antigo: true };
+    }
+    etagBanco = r.etag;
+    const { canais = [], migradoDe: m, ...dados } = r.dados;
+    migradoDe = m || null;
+    dados.messages = {};
+    enviados.clear();
+    for (const canal of canais) {
+      const c = await oneDrive.lerJson(arquivoCanal(canal));
+      if (!c) continue;   // canal sem arquivo: o envio parou no meio; os outros dados valem
+      dados.messages[canal] = c.dados;
+      enviados.set(canal, hash(JSON.stringify(c.dados)));
+    }
+    let avisou = false;
+    if (migradoDe && aoAntigoMudar) {
+      const velho = await oneDrive.lerJson(BANCO).catch(() => null);
+      if (velho && velho.etag !== migradoDe) {
+        aoAntigoMudar(velho.dados);
+        migradoDe = velho.etag;   // avisa uma vez só: o próximo envio grava a marca nova
+        avisou = true;
+      }
+    }
+    return { dados, antigo: false, avisou };
   }
 
   async function lerConfig() {
