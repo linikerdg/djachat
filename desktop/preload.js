@@ -15,4 +15,8 @@ contextBridge.exposeInMainWorld('djachatDesktop', {
   // área de transferência do sistema (não depende de a janela estar em foco)
   copiarTexto: (texto) => ipcRenderer.invoke('copiar-texto', String(texto)),
   copiarImagem: (png) => ipcRenderer.invoke('copiar-imagem', png),
+  // atualização automática: versão atual, aviso de versão nova baixada e reiniciar para instalar
+  versao: () => ipcRenderer.invoke('versao'),
+  aoAtualizar: (cb) => ipcRenderer.on('atualizacao', (_e, info) => cb(info)),
+  instalarAtualizacao: () => ipcRenderer.send('instalar-atualizacao'),
 });

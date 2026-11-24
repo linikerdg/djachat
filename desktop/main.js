@@ -106,6 +106,7 @@ function montarMenuBandeja() {
     const login = app.getLoginItemSettings({ args: ['--na-bandeja'] });
     itens.push({ label: 'Iniciar com o Windows', type: 'checkbox', checked: login.openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--na-bandeja'] }) });
   }
+  if (atualizacao) itens.push({ type: 'separator' }, { label: `Reiniciar para atualizar (versão ${atualizacao})`, click: instalarAtualizacao });
   itens.push({ type: 'separator' }, { label: 'Sair do DJAchat', click: sairDeVerdade });
   tray.setContextMenu(Menu.buildFromTemplate(itens));
   tray.setToolTip(dicaBandeja());
@@ -114,6 +115,32 @@ function criarBandeja() {
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 32, height: 32 }));
   tray.on('click', mostrarJanela);
   montarMenuBandeja();
+}
+
+// ---------------------------------------------------------------- atualização automática
+// O app instalado procura versão nova nos Releases do GitHub ao abrir e a cada 6 horas, e baixa sozinho.
+// Quando termina, mostra um aviso e a pessoa escolhe a hora de reiniciar; se só fechar o app, instala ao fechar.
+// (Rodando pelo npm start, em desenvolvimento, não procura nada.)
+let atualizador = null;
+let atualizacao = null;   // versão já baixada, esperando reiniciar
+function iniciarAtualizacoes() {
+  if (!app.isPackaged) return;
+  try { atualizador = require('electron-updater').autoUpdater; } catch (e) { console.error('Sem o electron-updater:', e.message); return; }
+  atualizador.autoDownload = true;
+  atualizador.autoInstallOnAppQuit = true;
+  atualizador.on('update-downloaded', (info) => {
+    atualizacao = info.version;
+    if (win) win.webContents.send('atualizacao', { versao: info.version });
+    montarMenuBandeja();
+  });
+  atualizador.on('error', (e) => console.error('Falha ao procurar atualização:', e && e.message));
+  const procurar = () => atualizador.checkForUpdates().catch(() => { /* sem internet: tenta na próxima */ });
+  setTimeout(procurar, 10000);
+  setInterval(procurar, 6 * 3600000);
+}
+function instalarAtualizacao() {
+  if (!atualizador || !atualizacao) return;
+  atualizador.quitAndInstall(false, true);   // instala com a janela de progresso e abre de novo
 }
 
 // Abrir o DJAchat de novo traz a janela que está na bandeja, em vez de abrir outra cópia
@@ -190,8 +217,13 @@ app.whenReady().then(() => {
     montarMenuBandeja();
   });
 
+  // versão do app e atualização já baixada (o app pergunta ao abrir ou recarregar)
+  ipcMain.handle('versao', () => ({ atual: app.getVersion(), pronta: atualizacao }));
+  ipcMain.on('instalar-atualizacao', instalarAtualizacao);
+
   criarBandeja();
   createWindow();
+  iniciarAtualizacoes();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

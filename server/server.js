@@ -22,7 +22,7 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 const CLIENT_DIR = path.join(__dirname, '..', 'client');
 const MAX_FILE = 500 * 1024 * 1024;   // 500 MB por arquivo
 const MAX_SOUND = 3 * 1024 * 1024;    // 3 MB por som do soundboard
-const HISTORY = 200;                  // mensagens enviadas ao abrir um canal
+const HISTORY = 100;                  // mensagens enviadas ao abrir um canal (e a cada página de mensagens antigas)
 const MAX_DISK = (Number(process.env.LIMITE_DISCO_GB) || 20) * 1024 ** 3;
 const MAX_WS = 1024 * 1024;           // 1 MB por mensagem do WebSocket
 const MAX_ONEDRIVE = (Number(process.env.LIMITE_ONEDRIVE_GB) || 200) * 1024 ** 3;
@@ -105,6 +105,7 @@ const dbVazio = () => ({
   sounds: [],     // { id, name, fileId, emoji }
   contas: {},     // uid -> { nome }   (conta leve: o código secreto fica no app de cada um)
   apelidos: {},   // apelido em minúsculas -> uid dono
+  subchats: [],   // { id: 'sc:<hex>', nome, canal (onde nasceu), msgId, criador, ts }
 });
 let db = dbVazio();
 // No modo OneDrive, a cópia local diz em qual versão do OneDrive se baseia e se tem mudanças ainda não enviadas
@@ -131,6 +132,7 @@ function normalizarDb() {
   db.files = Object.assign(Object.create(null), db.files);
   db.contas = Object.assign(Object.create(null), db.contas);
   db.apelidos = Object.assign(Object.create(null), db.apelidos);
+  if (!Array.isArray(db.subchats)) db.subchats = [];
 }
 normalizarDb();
 
@@ -171,10 +173,11 @@ function enviarRemoto() {
   if (enviandoRemoto) { agendarRemoto(); return enviandoRemoto; }
   if (!sync.pendente || !compartilhado.ativa) return Promise.resolve();
   const marca = mudancas, versao = sync.versao + 1;
-  const texto = JSON.stringify({ ...db, versao });
+  // cópia rasa: uma mensagem nova durante o envio não entra pela metade (ela vai no próximo)
+  const copia = { ...db, messages: Object.fromEntries(Object.entries(db.messages).map(([k, l]) => [k, l.slice()])) };
   enviandoRemoto = (async () => {
     try {
-      await compartilhado.salvarBanco(texto);
+      await compartilhado.salvarBanco(copia, versao);
       sync.versao = versao;
       if (mudancas === marca) sync.pendente = false;
       try { gravarLocal(); } catch { /* a próxima gravação local acerta */ }
@@ -204,7 +207,18 @@ async function iniciarCompartilhado() {
     catch (e) { if (e.codigo !== 'conflito') throw e; grupo = await compartilhado.lerConfig(); }
   }
 
-  const remoto = await compartilhado.lerBanco();
+  const lido = await compartilhado.lerBanco({
+    aoAntigoMudar(velho) {
+      // um servidor sem atualizar abriu depois da conversão e gravou no formato antigo
+      const copia = path.join(DATA_DIR, `db.formato-antigo-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+      fs.writeFileSync(copia, JSON.stringify(velho));
+      console.log('  ATENÇÃO: alguém abriu o servidor com uma versão antiga do DJAchat depois da atualização.');
+      console.log(`  O que ele gravou não entra aqui; ficou guardado em ${copia}`);
+      console.log('  Peça para todo mundo que hospeda atualizar o DJAchat.');
+    },
+  });
+  const remoto = lido && lido.dados;
+  if (lido && lido.antigo) console.log(`  Convertendo os dados do grupo para o formato novo (${contarMensagens(remoto)} mensagens).`);
   if (!remoto) {
     console.log(`  Primeira vez no OneDrive: enviando os dados deste PC (${contarMensagens(db)} mensagens).`);
     sync = { versao: 0, pendente: true, compartilhado: true };
@@ -230,8 +244,12 @@ async function iniciarCompartilhado() {
   }
   db = { ...dbVazio(), ...remoto };
   normalizarDb();
-  sync = { versao: versaoRemota, pendente: false, compartilhado: true };
+  sync = { versao: versaoRemota, pendente: !!(lido.antigo || lido.avisou), compartilhado: true };
   gravarLocal();
+  if (lido.antigo || lido.avisou) {
+    await enviarRemoto();
+    if (sync.pendente) throw new Error('não consegui gravar os dados do grupo no formato novo');
+  }
   return grupo;
 }
 
@@ -294,6 +312,7 @@ const anexos = (msgs) => msgs.flatMap((m) => (m.attachments || []).map((a) => a.
 // apaga do disco os arquivos da lista que nenhuma mensagem ou som usa mais
 function purgeFiles(ids) {
   const emUso = new Set(db.sounds.map((s) => s.fileId));
+  for (const p of Object.values(db.contas)) if (p.foto) emUso.add(p.foto);
   for (const list of Object.values(db.messages)) for (const id of anexos(list)) emUso.add(id);
   let mudou = false;
   for (const id of ids) {
@@ -318,7 +337,11 @@ const clients = new Map();  // id -> { id, ip, name, color, sock, voice, muted, 
 const tentativas = new Map();  // ip -> { n, ate, em } (senhas erradas)
 
 // id = conexão (voz e sinalização); uid = conta (estável entre conexões e PCs)
-const publicUser = (c) => ({ id: c.id, uid: c.uid, name: c.name, color: c.color, voice: c.voice, muted: c.muted, deafened: c.deafened, sharing: c.sharing });
+const perfilDe = (uidConta) => { const p = uidConta && db.contas[uidConta]; return p ? { foto: p.foto || null, status: p.status || null } : { foto: null, status: null }; };
+const publicUser = (c) => ({ id: c.id, uid: c.uid, name: c.name, color: c.color, voice: c.voice, muted: c.muted, deafened: c.deafened, sharing: c.sharing, ...perfilDe(c.uid) });
+// fotos de todas as contas (para quem escreveu e não está online)
+const fotos = () => Object.fromEntries(Object.entries(db.contas).filter(([, p]) => p.foto).map(([u, p]) => [u, p.foto]));
+const STATUS = ['online', 'ausente', 'ocupado'];
 const users = () => [...clients.values()].filter((c) => c.name).map(publicUser);
 
 function send(c, obj) { if (c && c.sock) wsSend(c.sock, JSON.stringify(obj)); }
@@ -332,8 +355,15 @@ const pushUsers = () => broadcast({ t: 'users', users: users() });
 // Uma conversa direta é um "canal" dm:<uid>:<uid> que só os dois participantes leem e recebem.
 const RE_DM = /^dm:([a-f0-9]{16}):([a-f0-9]{16})$/;
 const participantes = (canal) => { const r = RE_DM.exec(str(canal)); return r ? [r[1], r[2]] : null; };
-const podeVer = (c, canal) => { const p = participantes(canal); return !p || (!!c.uid && p.includes(c.uid)); };
-const publicoDe = (canal) => { const p = participantes(canal); return p ? (o) => !!o.uid && p.includes(o.uid) : undefined; };
+// Um subchat nasce de uma mensagem e vale o mesmo que a conversa de onde veio (de uma DM, só os dois veem)
+const subchatDe = (id) => (typeof id === 'string' && id.startsWith('sc:') ? db.subchats.find((x) => x.id === id) : null);
+const conversaBase = (canal) => { const sc = subchatDe(canal); return sc ? sc.canal : canal; };
+const podeVer = (c, canal) => { const p = participantes(conversaBase(canal)); return !p || (!!c.uid && p.includes(c.uid)); };
+const publicoDe = (canal) => { const p = participantes(conversaBase(canal)); return p ? (o) => !!o.uid && p.includes(o.uid) : undefined; };
+const subchatsDe = (c) => db.subchats.filter((x) => podeVer(c, x.id));
+const pushSubchats = () => { for (const o of clients.values()) if (o.name) send(o, { t: 'subchats', subchats: subchatsDe(o) }); };
+// todas as conversas de texto que a pessoa vê: canais, DMs e subchats
+const conversasDe = (c) => db.channels.filter((x) => x.kind === 'text').map((x) => x.id).concat(c.uid ? dmsDe(c.uid).map((d) => d.id) : [], subchatsDe(c).map((x) => x.id));
 function dmsDe(uidConta) {
   return Object.keys(db.messages).map((k) => [k, participantes(k)]).filter(([, p]) => p && p.includes(uidConta))
     .map(([k, p]) => { const outro = p[0] === uidConta ? p[1] : p[0]; return { id: k, kind: 'dm', outro, name: (db.contas[outro] || {}).nome || '?' }; });
@@ -344,6 +374,17 @@ function acharMsg(c, canal, id) {
   const lista = db.messages[canal];
   return lista ? lista.find((x) => x.id === id) : null;
 }
+// a última mensagem de cada conversa que a pessoa vê (o app compara com o que ela já leu)
+function ultimasDe(c) {
+  const r = {};
+  for (const id of conversasDe(c)) {
+    const l = db.messages[id];
+    const u = l && l[l.length - 1];
+    if (u) r[id] = { ts: u.ts, uid: u.uid || null };
+  }
+  return r;
+}
+const normalizar = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const COR = (nome) => COLORS[[...nome].reduce((a, ch) => a + ch.charCodeAt(0), 0) % COLORS.length];
 
 // ---------------------------------------------------------------- protocolo
@@ -384,7 +425,7 @@ function onMessage(c, raw) {
     }
     c.name = nome;
     c.color = COR(nome);
-    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
+    send(c, { t: 'welcome', you: publicUser(c), token: TOKEN_ARQUIVOS, session: SESSAO, ice: iceServers, channels: db.channels, dms: c.uid ? dmsDe(c.uid) : [], subchats: subchatsDe(c), ultimas: ultimasDe(c), fotos: fotos(), sounds: db.sounds, users: users(), hospedavel: !!(compartilhado && compartilhado.ativa && SENHA) });
     pushUsers();
     return;
   }
@@ -392,9 +433,16 @@ function onMessage(c, raw) {
 
   switch (m.t) {
     case 'history': {
+      // sem "antes": as últimas mensagens; com "antes" (id de mensagem): a página anterior a ela
       if (!podeVer(c, m.channel)) return;
       const list = db.messages[m.channel] || [];
-      send(c, { t: 'history', channel: m.channel, messages: list.slice(-HISTORY) });
+      let fim = list.length;
+      if (m.antes) {
+        fim = list.findIndex((x) => x.id === m.antes);
+        if (fim < 0) return send(c, { t: 'history', channel: m.channel, antes: m.antes, messages: [], mais: false });
+      }
+      const inicio = Math.max(0, fim - HISTORY);
+      send(c, { t: 'history', channel: m.channel, antes: m.antes || undefined, messages: list.slice(inicio, fim), mais: inicio > 0 });
       break;
     }
     case 'msg': {
@@ -402,6 +450,9 @@ function onMessage(c, raw) {
       let canal;
       if (p) {
         if (!c.uid || !p.includes(c.uid) || !db.contas[p[0]] || !db.contas[p[1]]) return;
+        canal = m.channel;
+      } else if (subchatDe(m.channel)) {
+        if (!podeVer(c, m.channel)) return;
         canal = m.channel;
       } else {
         const ch = db.channels.find((x) => x.id === m.channel && x.kind === 'text');
@@ -454,6 +505,109 @@ function onMessage(c, raw) {
       if (!(reacoes[emoji] || []).length) delete reacoes[emoji];
       save();
       broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
+      break;
+    }
+    case 'buscar': {
+      // procura nas conversas que a pessoa vê, sem diferença de acento nem de maiúsculas; as mais novas primeiro
+      const termo = normalizar(str(m.texto).trim()).slice(0, 100);
+      if (termo.length < 2) return send(c, { t: 'resultados', texto: m.texto, itens: [] });
+      const itens = [];
+      for (const canal of conversasDe(c)) {
+        for (const [pos, msg] of (db.messages[canal] || []).entries()) {
+          const onde = normalizar(`${msg.text || ''} ${(msg.attachments || []).map((a) => a.name).join(' ')} ${msg.author}`);
+          if (onde.includes(termo)) itens.push({ channel: canal, message: msg, pos });
+        }
+      }
+      itens.sort((a, b) => b.message.ts - a.message.ts || b.pos - a.pos);   // mesma hora: a que veio depois primeiro
+      send(c, { t: 'resultados', texto: m.texto, itens: itens.slice(0, 50).map(({ channel, message }) => ({ channel, message })), total: itens.length });
+      break;
+    }
+    case 'cercanias': {
+      // as mensagens em volta de uma (para abrir um resultado de busca ou uma fixada antiga)
+      if (!podeVer(c, m.channel)) return;
+      const list = db.messages[m.channel] || [];
+      const i = list.findIndex((x) => x.id === m.id);
+      if (i < 0) return send(c, { t: 'error', message: 'Essa mensagem não existe mais.' });
+      const inicio = Math.max(0, i - 50);
+      send(c, { t: 'cercanias', channel: m.channel, id: m.id, messages: list.slice(inicio, i + 50), mais: inicio > 0, depois: i + 50 < list.length });
+      break;
+    }
+    case 'fixar': {
+      const msg = acharMsg(c, m.channel, m.id);
+      if (!msg) return;
+      if (m.fixar) msg.fixada = { por: c.name, ts: Date.now() }; else delete msg.fixada;
+      save();
+      broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
+      break;
+    }
+    case 'fixadas': {
+      if (!podeVer(c, m.channel)) return;
+      const lista = (db.messages[m.channel] || []).filter((x) => x.fixada).sort((a, b) => b.fixada.ts - a.fixada.ts);
+      send(c, { t: 'fixadas', channel: m.channel, messages: lista });
+      break;
+    }
+    case 'perfil': {
+      // foto (id de um arquivo de imagem já enviado, ou null para tirar) e status
+      if (!c.uid || !db.contas[c.uid]) return;
+      const conta = db.contas[c.uid];
+      if ('foto' in m) {
+        const f = m.foto && db.files[m.foto];
+        if (m.foto && (!f || !/^image\/(png|jpe?g|gif|webp)$/i.test(f.mime))) return send(c, { t: 'error', message: 'A foto precisa ser uma imagem (png, jpg, gif ou webp).' });
+        const antiga = conta.foto;
+        if (m.foto) conta.foto = m.foto; else delete conta.foto;
+        if (antiga && antiga !== conta.foto) purgeFiles([antiga]);
+      }
+      if ('status' in m) {
+        const st = m.status || {};
+        const tipo = STATUS.includes(st.tipo) ? st.tipo : 'online';
+        const texto = str(st.texto).trim().slice(0, 60);
+        // auto = ausente por estar parado: o app volta para online sozinho (inclusive depois de reiniciar)
+        if (tipo === 'online' && !texto) delete conta.status; else conta.status = { tipo, texto, ...(tipo === 'ausente' && st.auto ? { auto: true } : {}) };
+      }
+      save();
+      pushUsers();
+      // a lista de fotos (que redesenha as mensagens) só vai quando a foto mudou, não a cada status
+      if ('foto' in m) broadcast({ t: 'fotos', fotos: fotos() });
+      break;
+    }
+    case 'subchat_criar': {
+      // um subchat a partir de uma mensagem (não dá para criar subchat dentro de subchat)
+      if (subchatDe(m.channel)) return;
+      const msg = acharMsg(c, m.channel, m.id);
+      if (!msg) return;
+      if (msg.subchat && subchatDe(msg.subchat.id)) return send(c, { t: 'subchat_criado', id: msg.subchat.id });
+      const nome = str(m.nome).trim().slice(0, 60) || resumoMsg(msg).slice(0, 40) || 'subchat';
+      const sc = { id: 'sc:' + uid(), nome, canal: m.channel, msgId: msg.id, criador: c.name, ts: Date.now() };
+      db.subchats.push(sc);
+      msg.subchat = { id: sc.id, nome };
+      save();
+      broadcast({ t: 'msg_update', message: msg }, publicoDe(m.channel));
+      pushSubchats();
+      send(c, { t: 'subchat_criado', id: sc.id });
+      break;
+    }
+    case 'subchat_renomear': {
+      const sc = subchatDe(m.id);
+      const nome = str(m.nome).trim().slice(0, 60);
+      if (!sc || !nome || !podeVer(c, sc.id)) return;
+      sc.nome = nome;
+      const origem = (db.messages[sc.canal] || []).find((x) => x.id === sc.msgId);
+      if (origem && origem.subchat) { origem.subchat.nome = nome; broadcast({ t: 'msg_update', message: origem }, publicoDe(sc.canal)); }
+      save();
+      pushSubchats();
+      break;
+    }
+    case 'subchat_apagar': {
+      const sc = subchatDe(m.id);
+      if (!sc || !podeVer(c, sc.id)) return;
+      db.subchats = db.subchats.filter((x) => x !== sc);
+      const arquivos = anexos(db.messages[sc.id] || []);
+      delete db.messages[sc.id];
+      purgeFiles(arquivos);
+      const origem = (db.messages[sc.canal] || []).find((x) => x.id === sc.msgId);
+      if (origem) { delete origem.subchat; broadcast({ t: 'msg_update', message: origem }, publicoDe(sc.canal)); }
+      save();
+      pushSubchats();
       break;
     }
     case 'typing':
@@ -520,8 +674,13 @@ function onMessage(c, raw) {
       const [ch] = db.channels.splice(i, 1);
       const arquivos = anexos(db.messages[ch.id] || []);
       delete db.messages[ch.id];
+      // os subchats que nasceram nele vão junto
+      const foram = db.subchats.filter((x) => x.canal === ch.id);
+      for (const sc of foram) { arquivos.push(...anexos(db.messages[sc.id] || [])); delete db.messages[sc.id]; }
+      db.subchats = db.subchats.filter((x) => x.canal !== ch.id);
       purgeFiles(arquivos);
       save();
+      if (foram.length) pushSubchats();
       for (const o of clients.values()) if (o.voice === ch.id) leaveVoice(o, false);
       broadcast({ t: 'channels', channels: db.channels });
       pushUsers();
@@ -948,7 +1107,8 @@ async function conectarOneDrive() {
     console.log('  OneDrive conectado.');
   }
   try {
-    const dados = await criarCompartilhado({ oneDrive, aoPerder() {} }).lerBanco();
+    const lido = await criarCompartilhado({ oneDrive, aoPerder() {} }).lerBanco();
+    const dados = lido && lido.dados;
     if (dados) console.log(`  Achei os dados do grupo nesta conta: ${contarMensagens(dados)} mensagens em ${(dados.channels || []).length} canais.`);
     else console.log('  Esta conta ainda não tem dados do DJAchat: o servidor envia os deste PC ao abrir.');
   } catch (e) { console.log(`  (não consegui conferir os dados agora: ${e.message})`); }

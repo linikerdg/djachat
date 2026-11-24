@@ -67,7 +67,12 @@
   </aside>
 
   <main id="main">
-    <header id="mainHeader"><span id="chanTitle"></span><span id="chanSub" class="muted small"></span></header>
+    <header id="mainHeader"><span id="chanTitle"></span><span id="chanSub" class="muted small"></span>
+      <div class="acoes-topo">
+        <button type="button" id="btnFixadas" class="icon" title="Mensagens fixadas"><i data-ic="pin"></i></button>
+        <label class="busca" title="Buscar em todas as conversas (Ctrl+F)"><i data-ic="search"></i><input id="busca" placeholder="Buscar" autocomplete="off"></label>
+      </div>
+    </header>
 
     <!-- Visão de texto -->
     <section id="textView">
@@ -80,6 +85,7 @@
         <button type="button" id="btnAttach" class="icon" title="Anexar arquivo"><i data-ic="paperclip"></i></button>
         <input type="file" id="fileInput" multiple hidden>
         <textarea id="msgInput" rows="1" placeholder="Conversar…"></textarea>
+        <button type="button" id="btnEmoji" class="icon" title="Emoji"><i data-ic="smile"></i></button>
         <button type="button" id="btnSend" class="icon" title="Enviar (Enter)"><i data-ic="send-horizontal"></i></button>
       </form>
       <div id="dropHint" class="hidden">Solte para enviar</div>
@@ -93,9 +99,21 @@
     </section>
   </main>
 
+  <!-- painel de busca e de mensagens fixadas (fica por cima da lista de membros) -->
+  <aside id="painel" class="hidden">
+    <div class="painel-topo"><b id="painelTitulo"></b><button type="button" class="icon" id="painelFechar" title="Fechar (Esc)"><i data-ic="x"></i></button></div>
+    <div id="painelLista"></div>
+  </aside>
+
   <aside id="members">
-    <div class="cat"><span>Online — <b id="onlineCount">0</b></span></div>
-    <div id="memberList"></div>
+    <section id="secOnline" class="secao-direita">
+      <div class="cat"><span>Online — <b id="onlineCount">0</b></span></div>
+      <div id="memberList" class="corpo-secao"></div>
+    </section>
+    <section id="secSubchats" class="secao-direita">
+      <div class="cat"><span>Subchats — <b id="subchatCount">0</b></span></div>
+      <div id="subchatList" class="corpo-secao"></div>
+    </section>
   </aside>
 </div>
 
@@ -128,6 +146,15 @@
 <div id="toast" class="hidden"></div>
 
 <script src="icones.js"></script>
+<script src="texto.js"></script>
+<script src="emojis.js"></script>
+<script src="nucleo.js"></script>
+<script src="chat.js"></script>
+<script src="voz.js"></script>
+<script src="configuracoes.js"></script>
+<script src="menus.js"></script>
+<script src="perfil.js"></script>
+<script src="busca.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
